@@ -317,7 +317,7 @@ def test_the_color_row_recolours_a_plain_colour_material(monkeypatch):
             SetGroupMaterialCommand(g, paint)]))
         monkeypatch.setattr(color_dialog.QColorDialog, "getColor",
                             staticmethod(lambda *a, **k: QColor(0, 255, 0)))
-        panel._on_pick_tint()                       # choose → applies at once
+        panel._on_change_active()                   # choose → applies at once
         assert tuple(face.attrs["color"]) == (0.0, 1.0, 0.0)
         assert tuple(g.material["color"]) == (0.0, 1.0, 0.0)
         assert vp.history.undo()

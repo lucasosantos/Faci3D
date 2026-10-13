@@ -447,9 +447,10 @@ def test_manager_shows_update_and_trust_details_without_downloading(
         buttons = [button.text() for button in row.findChildren(QPushButton)]
         assert any("Update available" in label for label in labels)
         assert "License: MIT" in labels
-        assert any("not reviewed by an IngeTrazo maintainer" in label
+        from core.version import APP_NAME
+        assert any(f"not reviewed by an {APP_NAME} maintainer" in label
                    for label in labels)
-        assert any("v1.0" in label and "Tested with IngeTrazo" in label
+        assert any("v1.0" in label and f"Tested with {APP_NAME}" in label
                    for label in labels)
         assert "Update" in buttons
         assert "Repository ↗" in buttons
@@ -540,7 +541,8 @@ def test_incompatible_extension_is_not_offered_for_install_or_enable(
         row = dialog._pages["browse"]["grid"].itemAt(0).widget()
         labels = [label.text() for label in row.findChildren(QLabel)]
         buttons = [button.text() for button in row.findChildren(QPushButton)]
-        assert any("Requires IngeTrazo 99.0 or later" in label
+        from core.version import APP_NAME
+        assert any(f"Requires {APP_NAME} 99.0 or later" in label
                    for label in labels)
         assert "Download" not in buttons
         assert "Enable" not in buttons

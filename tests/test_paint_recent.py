@@ -208,8 +208,7 @@ def test_panel_row_follows_paints_and_hides_when_empty(window, tmp_path):
     face = _quad(vp.scene.mesh)
     vp._pixel_to_ray = lambda *_a: (None, None)
     vp.pick_face_any = lambda *_a: (face, None)
-    tex = _png(tmp_path / "ladrillo.png", (0.7, 0.3, 0.2))
-    _use(texture={"path": tex, "sw": 0.3, "sh": 0.2, "rot": 0.0})
+    _use(color=(0.7, 0.3, 0.2), name="Ladrillo")
     PaintTool().on_click(ToolContext(viewport=vp, world=QVector3D(),
                                      screen=QPointF(0, 0),
                                      modifiers=Qt.NoModifier, snap=None))
@@ -217,27 +216,24 @@ def test_panel_row_follows_paints_and_hides_when_empty(window, tmp_path):
     PaintTool().on_click(ToolContext(viewport=vp, world=QVector3D(),
                                      screen=QPointF(0, 0),
                                      modifiers=Qt.NoModifier, snap=None))
-    assert _row_tips(panel) == ["RAL 5015", "ladrillo"]
+    assert _row_tips(panel) == ["RAL 5015", "Ladrillo"]
     assert not panel._recent_heading.isHidden()
 
 
 def test_clicking_a_recent_swatch_restores_it_exactly(window, tmp_path):
     panel = _panel(window)
-    tex = _png(tmp_path / "vidrio.png", (0.6, 0.8, 0.9))
     PaintTool.recent = [
-        {"texture": {"path": tex, "sw": 1.5, "sh": 0.75, "rot": 90.0},
-         "opacity": 0.4, "mat": "Vidrio"},
+        {"color": [0.6, 0.8, 0.9], "opacity": 0.4, "mat": "Vidrio"},
         {"color": [0.25, 0.5, 0.75]},
     ]
     panel._refresh_recent()
     PaintTool.current_is_default = True
     panel._recent_grid.itemAt(0).widget().click()
     assert PaintTool.current_is_default is False
-    assert PaintTool.current_texture == {"path": tex, "sw": 1.5, "sh": 0.75,
-                                         "rot": 90.0}
+    assert PaintTool.current_texture is None
+    assert PaintTool.current_color == (0.6, 0.8, 0.9)
     assert PaintTool.current_opacity == 0.4
     assert PaintTool.current_material.name == "Vidrio"
-    assert panel._sw_box.value() == 1.5 and panel._rot_box.value() == 90.0
     assert isinstance(window.viewport.active_tool, PaintTool)
 
     panel._recent_grid.itemAt(1).widget().click()

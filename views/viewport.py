@@ -1014,6 +1014,12 @@ class Viewport(QOpenGLWidget):
         self._axes_vao = None
         self._axes_vbo = None
         self._guides_vbo = None
+        #: Faci3D's print bed (core.printer.Printer) drawn on the ground,
+        #: or None. Set with :meth:`set_print_bed`.
+        self.print_bed = None
+        self._bed_vao = None
+        self._bed_key = None
+        self._bed_spans: dict = {}
 
         self._edges_vao = None
         self._edges_vbo = None
@@ -1277,6 +1283,8 @@ class Viewport(QOpenGLWidget):
 
         # Axes rebuilt per frame (dash spacing scales with zoom), so dynamic.
         self._axes_vao, self._axes_vbo = self._create_dynamic()
+        self._bed_vao, self._bed_vbo = self._create_dynamic()
+        self._bed_key = None
         self._guides_vao, self._guides_vbo = self._create_dynamic()
         self._axes_spans: dict = {}
 
@@ -1537,6 +1545,7 @@ class Viewport(QOpenGLWidget):
         # the reference layers and before any model geometry: they are what
         # the user draws ON TOP of.
         self._draw_image_planes()
+        self._draw_print_bed()
         _fmark("ground")
 
         # No grid — the infinite axes are the spatial reference.
@@ -4365,6 +4374,48 @@ class Viewport(QOpenGLWidget):
         prog.release()
         fbo.release()
         self._gl.glEnable(GL_BLEND)
+
+    def set_print_bed(self, printer) -> None:
+        """Show ``printer``'s bed and build volume (``None`` hides them)."""
+        self.print_bed = printer
+        self.update()
+
+    def _draw_print_bed(self) -> None:
+        """The print bed: a faint plate on the ground with a 10 mm grid, and
+        the build volume's edges. Scaffolding like the axes: depth-tested
+        but never writing depth, and drawn before the model, so a part
+        sitting on the plate shows whole and the volume's far edges hide
+        behind it."""
+        bed = self.print_bed
+        if (bed is None or self._bed_vao is None
+                or self.plano_style is not None
+                or self.style_override is not None):
+            return
+        if self._bed_key != bed:
+            from core import printer as _printer
+            plate = _printer.plate_triangles(bed)
+            grid = _printer.grid_lines(bed)
+            box = _printer.volume_edges(bed)
+            data = array("f", plate + grid + box).tobytes()
+            self._bed_vbo.bind()
+            self._bed_vbo.allocate(data, len(data))
+            self._bed_vbo.release()
+            n_plate, n_grid = len(plate) // 3, len(grid) // 3
+            self._bed_spans = {"plate": (0, n_plate),
+                               "grid": (n_plate, n_grid),
+                               "box": (n_plate + n_grid, len(box) // 3)}
+            self._bed_key = bed
+        self._gl.glDepthMask(GL_FALSE)
+        self._bed_vao.bind()
+        for part, prim, rgba in (
+                ("plate", GL_TRIANGLES, (0.42, 0.52, 0.66, 0.16)),
+                ("grid", GL_LINES, (0.40, 0.48, 0.60, 0.35)),
+                ("box", GL_LINES, (0.35, 0.45, 0.62, 0.60))):
+            start, count = self._bed_spans[part]
+            self._set_color(*rgba)
+            self._gl.glDrawArrays(prim, start, count)
+        self._bed_vao.release()
+        self._gl.glDepthMask(GL_TRUE)
 
     def _draw_shadow_ground(self, style) -> None:
         """The on-ground shadow catcher: a world plane just under z=0 that

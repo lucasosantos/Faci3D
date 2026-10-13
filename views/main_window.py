@@ -33,7 +33,7 @@ from core.i18n import (LANGUAGE_NAMES, available_languages, current_language,
 from views.theme import style as theme_style
 from core.units import fmt_pair
 from views.filedialogs import file_dialogs
-from core.version import __version__
+from core.version import APP_NAME, __version__
 from core.group import Group
 from core.history import (
     ExplodeGroupCommand,
@@ -43,6 +43,7 @@ from core.history import (
     SnapshotImport,
     SnapshotMutation,
 )
+from core.flat_paint import flatten_textures
 from core.mesh import Edge, Face
 from formats import igz as igz_format
 from formats import dae as dae_format
@@ -66,7 +67,6 @@ from tools.fillet import FilletTool
 from tools.followme import FollowMeTool
 from tools.rotated_rectangle import RotatedRectangleTool
 from tools.offset import OffsetTool
-from tools.texture_position import TexturePositionTool
 from tools.walkthrough import (FirstPersonTool, LookAroundTool,
                                PositionCameraTool, WalkTool)
 from tools.paint import PaintTool
@@ -99,10 +99,10 @@ _VIEW_TIPS = {
            "the three axes.",
 }
 _STYLE_TIPS = {
-    "Default": "Faces with their materials and textures, under the sky.",
+    "Default": "Faces in their colours, under the sky.",
     "Architectural": "Faces with their materials on a plain white "
                      "background, without the sky.",
-    "Shaded": "Faces in their colours, without textures.",
+    "Shaded": "Faces in their colours, on a plain background.",
     "Hidden line": "White faces that hide what lies behind them — a clean "
                    "line drawing.",
     "Monochrome": "Every face in the front or back colour, without "
@@ -137,6 +137,16 @@ def _repeatable(label: str):
             return fn(self, *args)
         return wrapper
     return deco
+
+
+def _solid_colours(load):
+    """Wrap an importer so what it brings in arrives in solid colours:
+    Faci3D paints with filament colours, never images (core.flat_paint)."""
+    def run(scene):
+        result = load(scene)
+        flatten_textures(scene)
+        return result
+    return run
 
 
 def _obj_parts(temp):
@@ -226,6 +236,10 @@ class _DockDropZone(QWidget):
 class MainWindow(QMainWindow):
     """Top-level IngeTrazo window."""
 
+    #: Faci3D's 3D-printing interface (views/print_mode.py). main.py turns
+    #: it on; tests build the full interface unless they ask for it.
+    print_mode = False
+
     def __init__(self, defer_extensions: bool = False) -> None:
         super().__init__()
         # main.py passes True: the plugins' setup runs once the window is up
@@ -253,9 +267,6 @@ class MainWindow(QMainWindow):
             "flip": FlipTool(),
             "followme": FollowMeTool(),
             "fillet": FilletTool(),
-            # Entered from a textured face's right-click menu, never from
-            # the toolbar (Texture ▸ Position).
-            "texture_position": TexturePositionTool(),
             "paint": PaintTool(),
             "dimension": DimensionTool(),
             "eraser": EraserTool(),
@@ -359,6 +370,9 @@ class MainWindow(QMainWindow):
         geo = st.value("ui/window_geometry")
         if geo:
             self.restoreGeometry(geo)
+        if self.print_mode:
+            from views import print_mode
+            print_mode.apply(self)
 
         self._setup_autosave()
         # An untitled recovery slot on disk means the last session died with
@@ -554,6 +568,7 @@ class MainWindow(QMainWindow):
             return
         try:
             igz_format.load_into(self.viewport.scene, slot)
+            flatten_textures(self.viewport.scene)
         except Exception as exc:  # noqa: BLE001
             QMessageBox.critical(self, tr("Open failed"), str(exc))
             return
@@ -606,6 +621,7 @@ class MainWindow(QMainWindow):
         self.shadows_panel = ShadowsPanel(self)
         self.dimstyle_panel = DimensionStylePanel(self)
         panels_tb = self._new_toolbar(tr("Panels"), "panels_toolbar")
+        self._panel_actions: dict[str, QAction] = {}
         for panel, key, title, tip in (
                 (self.styles_panel, "styles", tr("Styles"),
                  tr("How the model looks: faces, edges, background and "
@@ -627,7 +643,7 @@ class MainWindow(QMainWindow):
             wa.setDefaultWidget(panel)
             menu.addAction(wa)
             btn.setMenu(menu)
-            panels_tb.addWidget(btn)
+            self._panel_actions[key] = panels_tb.addWidget(btn)
             self._icon_actions.append((btn, key))
 
         # Terrain profile dock (Track G, G4) — hidden until requested.
@@ -1757,12 +1773,16 @@ class MainWindow(QMainWindow):
         super().contextMenuEvent(event)
 
     def _sidebar_docks(self) -> list:
-        return [d for d in (getattr(self, "tray", None),
-                            getattr(self, "bim_tray", None),
-                            getattr(self, "georef_tray", None),
-                            getattr(self, "project_browser", None),
-                            *getattr(self, "_extension_docks", ()))
-                if d is not None]
+        docks = [d for d in (getattr(self, "tray", None),
+                             getattr(self, "bim_tray", None),
+                             getattr(self, "georef_tray", None),
+                             getattr(self, "project_browser", None),
+                             *getattr(self, "_extension_docks", ()))
+                 if d is not None]
+        if self.print_mode:
+            from views.print_mode import hides_dock
+            docks = [d for d in docks if not hides_dock(d)]
+        return docks
 
     def _build_sidebar_handle(self) -> None:
         """LibreOffice's sidebar handle: a slim button sitting ON the line
@@ -2348,6 +2368,9 @@ class MainWindow(QMainWindow):
         anchor = self._ext_anchor
         bars_before = set(self.findChildren(QToolBar))
         plugins, errors = discover_plugins()
+        if self.print_mode:
+            from views.print_mode import skip_plugin
+            plugins = [p for p in plugins if not skip_plugin(p)]
         from core.extension_manager import extension_startup_state
         self._extension_startup_state = extension_startup_state()
 
@@ -2644,6 +2667,10 @@ class MainWindow(QMainWindow):
              tr("Bring in an STL mesh — a 3D print or a scan — at the "
                 "scale you choose."),
              self._on_import_stl),
+            (tr("SVG drawing (.svg)…"),
+             tr("Bring in a 2D drawing — a logo, a name, an outline — as "
+                "flat faces on the ground, ready for Push/Pull."),
+             self._on_import_svg),
             (tr("Image (PNG / JPG)…"),
              tr("Place a picture in the model to trace over."),
              self._on_import_image),
@@ -2944,7 +2971,7 @@ class MainWindow(QMainWindow):
         self._update_status_hint()
         # Select is where Repeat is pressed FROM, and the two tools entered
         # from a right-click need the face or group that click was on.
-        if key not in ("select", "texture_position", "change_axes"):
+        if key not in ("select", "change_axes"):
             self._remember_command(tool.name,
                                    lambda k=key: self._activate_tool(k))
 
@@ -3338,6 +3365,7 @@ class MainWindow(QMainWindow):
         from formats import igz as _igz
         temp = _Scene()
         _igz.load_into(temp, Path(path))       # raises before anything moves
+        flatten_textures(temp)
         templates = definitions_of(temp)
         if not templates:
             return 0
@@ -3913,12 +3941,6 @@ class MainWindow(QMainWindow):
             # menu and Marco could not find it (2026-09-10).
             menu.addAction(tr("Reverse Faces"), self._on_reverse_faces)
             menu.addAction(tr("Orient Faces"), self._on_orient_faces)
-            face = self._single_textured_face()
-            if face is not None:
-                # The Texture submenu, on a face with an image.
-                texm = menu.addMenu(tr("Texture"))
-                texm.addAction(tr("Position"), self._on_texture_position)
-                texm.addAction(tr("Reset Position"), self._on_texture_reset)
         if has_mesh or has_group:
             # Flip Along ▸ Red / Green / Blue: a mirror in place about the
             # selection's centre in one click, the way modelling tutorials
@@ -4048,64 +4070,6 @@ class MainWindow(QMainWindow):
         redo.setEnabled(bool(self.viewport.history.redo_stack))
 
         menu.exec(global_pos)
-
-    def _single_textured_face(self):
-        """``(face, side)``: the one selected face with an image texture on
-        the side the right-click saw — the Texture menu acts on the
-        side you click; when only the other side carries an image, that
-        one (Marco painted the underside of a slab from above, 2026-09-15).
-        ``None`` otherwise."""
-        from core.mesh import Face
-        from tools.paint import clicked_back_side
-        from tools.texture_position import TexturePositionTool
-        faces = [e for e in self.viewport.scene.selection if isinstance(e, Face)]
-        if len(faces) != 1:
-            return None
-        face = faces[0]
-        px = getattr(self.viewport, "_context_pixel", None)
-        clicked = "front"
-        if px is not None and clicked_back_side(self.viewport, face, None, px[0], px[1]):
-            clicked = "back"
-        other = "back" if clicked == "front" else "front"
-        for side in (clicked, other):
-            if TexturePositionTool.side_texture(face, side) is not None:
-                return face, side
-        return None
-
-    def _on_texture_position(self) -> None:
-        """Texture ▸ Position: the pins on the tile under the right-click."""
-        hit = self._single_textured_face()
-        if hit is None:
-            return
-        face, side = hit
-        tool = self._tools["texture_position"]
-        at = None
-        px = getattr(self.viewport, "_context_pixel", None)
-        if px is not None:
-            from core.snap import face_plane_world
-            origin, direction = self.viewport._pixel_to_ray(px[0], px[1])
-            if origin is not None:
-                p0, n = face_plane_world(face, None)
-                at = self.viewport._ray_plane(origin, direction, p0, n)
-        self._activate_tool("texture_position")
-        if not tool.begin(self.viewport, face, at, side=side):
-            self._activate_tool("select")
-
-    def _on_texture_reset(self) -> None:
-        """Texture ▸ Reset Position: back to the default planar projection
-        (no per-face map, no rotation) on the clicked side."""
-        hit = self._single_textured_face()
-        if hit is None:
-            return
-        face, side = hit
-        from tools.texture_position import TexturePositionTool
-        tex = TexturePositionTool.side_texture(face, side) or {}
-        if "uvw" not in tex and "rot" not in tex:
-            return
-        flat = {k: v for k, v in tex.items() if k not in ("uvw", "rot")}
-        self.viewport.history.execute(
-            TexturePositionTool.side_command(face, side, flat))
-        self.viewport.update()
 
     def _add_select_submenu(self, menu, sel) -> None:
         """Right-click ▸ Select: grow the selection by what it
@@ -4915,6 +4879,9 @@ class MainWindow(QMainWindow):
         cam.target = fresh.target
         for k in self._CAMERA_FIELDS:
             setattr(cam, k, getattr(fresh, k))
+        if self.print_mode:
+            from views.print_bed import frame_bed
+            frame_bed(self)
         self.viewport.update()
 
     @staticmethod
@@ -5167,6 +5134,9 @@ class MainWindow(QMainWindow):
         if suffix == ".dae":
             self._import_dae_path(path)
             return True
+        if suffix == ".svg":
+            from views.svg_import import import_svg_path
+            return import_svg_path(self, path)
         if suffix == ".skp":
             return self.import_skp_path(path)
         if suffix == ".dxf":
@@ -5202,6 +5172,7 @@ class MainWindow(QMainWindow):
             try:
                 igz_format.load_into(self.viewport.scene,
                                      slot if recovered else path, progress=cb)
+                flatten_textures(self.viewport.scene)
             except Exception as exc:  # noqa: BLE001 - surface any IO/parse error to the user
                 dlg.close()
                 QMessageBox.critical(self, tr("Open failed"), str(exc))
@@ -5385,6 +5356,18 @@ class MainWindow(QMainWindow):
         # The classic placement, measured by the user: 60-70 cm to the left
         # and 60 cm forward (toward the viewer) of the origin.
         from PySide6.QtGui import QVector3D
+        if self.print_mode:
+            # Faci3D: a 150 mm potted plant beside the origin — the size of
+            # a printed part, where the 1.70 m engineer would dwarf it.
+            group = self._make_billboard_person(
+                "plant_pot.png", height=0.15, name=tr("Plant pot"),
+                position=QVector3D(-0.16, -0.10, 0.0))
+            if group is not None:
+                scene = self.viewport.scene
+                scene.groups.append(group)
+                scene.version += 1
+                self._saved_version = scene.version
+                return
         at = QVector3D(-0.65, -0.60, 0.0)
         # The engineer since 26-09 (Marco: «el personaje Sumari no me gusta
         # mucho, ¿ponemos el del ingeniero?»); Sumari stays in the library.
@@ -5479,6 +5462,7 @@ class MainWindow(QMainWindow):
             # bundled component needs no network and no sidecar textures.
             from formats import igz as _igz
             _igz.load_into(temp, igz_path)
+            flatten_textures(temp)
             if not temp.groups:
                 QMessageBox.warning(
                     self, tr("Insert component"),
@@ -5488,11 +5472,13 @@ class MainWindow(QMainWindow):
         elif glb_path.exists():
             from formats.glb import load_glb
             load_glb(temp, glb_path)
+            flatten_textures(temp)
             mesh = temp.groups[0].mesh
             name = name or temp.groups[0].name
         elif obj_path.exists():
             from formats import obj as _obj
             _obj.load_obj(temp, obj_path)
+            flatten_textures(temp)
             parts = _obj_parts(temp)
             if parts is not None:
                 parts.name = name or tr(key.capitalize())
@@ -5544,6 +5530,7 @@ class MainWindow(QMainWindow):
         try:
             _obj.load_obj(temp, obj,
                            matrix=library.model_matrix(entry, obj))
+            flatten_textures(temp)
         except Exception as exc:  # noqa: BLE001
             QMessageBox.critical(self, tr("Component library"), str(exc))
             return
@@ -5884,8 +5871,8 @@ class MainWindow(QMainWindow):
     def _import_glb_path(self, path: Path) -> None:
         from formats import glb as glb_format
         dlg, cb = self._import_progress(tr("Importing {name}…", name=path.name))
-        cmd = SnapshotImport(
-            lambda scene: glb_format.load_glb(scene, path, progress=cb))
+        cmd = SnapshotImport(_solid_colours(
+            lambda scene: glb_format.load_glb(scene, path, progress=cb)))
         try:
             self.viewport.history.execute(cmd)
         except Exception as exc:  # noqa: BLE001
@@ -5901,8 +5888,8 @@ class MainWindow(QMainWindow):
 
     def _import_dae_path(self, path: Path) -> None:
         dlg, cb = self._import_progress(tr("Importing {name}…", name=path.name))
-        cmd = SnapshotImport(
-            lambda scene: dae_format.load_dae(scene, path, progress=cb))
+        cmd = SnapshotImport(_solid_colours(
+            lambda scene: dae_format.load_dae(scene, path, progress=cb)))
         try:
             self.viewport.history.execute(cmd)
         except Exception as exc:  # noqa: BLE001
@@ -5942,8 +5929,8 @@ class MainWindow(QMainWindow):
                 QMessageBox.critical(self, tr("Import SKP failed"), str(exc))
                 return False
             if payload is not None:
-                cmd = SnapshotImport(
-                    lambda scene: skp_format.apply_payload(scene, payload))
+                cmd = SnapshotImport(_solid_colours(
+                    lambda scene: skp_format.apply_payload(scene, payload)))
                 try:
                     self.viewport.history.execute(cmd)
                 except Exception as exc:  # noqa: BLE001
@@ -6096,6 +6083,7 @@ class MainWindow(QMainWindow):
         path = Path(path)
         temp = _Scene()
         _igz.load_into(temp, path)            # raises before anything moves
+        flatten_textures(temp)
         self.viewport.end_group_edit()
         comp = import_document_as_component(self.viewport.scene, temp,
                                             path.stem)
@@ -6122,9 +6110,9 @@ class MainWindow(QMainWindow):
         if scale is None:
             return
         dlg, cb = self._import_progress(tr("Importing {name}…", name=path.name))
-        cmd = SnapshotImport(
+        cmd = SnapshotImport(_solid_colours(
             lambda scene: obj_format.load_obj(scene, path, progress=cb,
-                                              scale=scale))
+                                              scale=scale)))
         try:
             self.viewport.history.execute(cmd)
         except Exception as exc:  # noqa: BLE001
@@ -6137,6 +6125,15 @@ class MainWindow(QMainWindow):
         self._import_name = path.name
         self._update_title()
         self.statusBar().showMessage(tr("Imported {name}", name=path.name), 3000)
+
+    def _on_import_svg(self) -> None:
+        """File ▸ Import ▸ SVG (views/svg_import.py)."""
+        path_str, _ = file_dialogs.getOpenFileName(
+            self, tr("Import SVG"), "",
+            tr("SVG drawing (*.svg);;All files (*)"))
+        if path_str:
+            from views.svg_import import import_svg_path
+            import_svg_path(self, Path(path_str))
 
     def _on_import_stl(self) -> None:
         from PySide6.QtWidgets import (QComboBox, QDialog, QDialogButtonBox,
@@ -7112,7 +7109,7 @@ class MainWindow(QMainWindow):
     def _update_title(self) -> None:
         if self._workspace is not None:
             marker = " *" if self._is_dirty() else ""
-            self.setWindowTitle(f"IngeTrazo — {self._workspace.title()}{marker}")
+            self.setWindowTitle(f"{APP_NAME} — {self._workspace.title()}{marker}")
             return
         if self._current_path is not None:
             name = self._current_path.name
@@ -7121,7 +7118,7 @@ class MainWindow(QMainWindow):
         else:
             name = tr("Untitled")
         marker = " *" if self._is_dirty() else ""
-        self.setWindowTitle(f"IngeTrazo — {name}{marker}")
+        self.setWindowTitle(f"{APP_NAME} — {name}{marker}")
         self._refresh_sheet_tabs()      # a new / opened document: its sheets
 
     # ---- Window lifecycle ---------------------------------------------------

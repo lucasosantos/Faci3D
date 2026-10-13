@@ -77,7 +77,14 @@ def source_of(text: str) -> str:
     if _reverse_of is not _catalog:
         _reverse = {v: k for k, v in _catalog.items()}
         _reverse_of = _catalog
+    from core.version import APP_NAME, UPSTREAM_NAME
+    text = text.replace(APP_NAME, UPSTREAM_NAME)
     return _reverse.get(text, text)
+
+
+def _rebrand(text: str) -> str:
+    from core.version import APP_NAME, UPSTREAM_NAME
+    return text.replace(UPSTREAM_NAME, APP_NAME)
 
 
 def tr(text: str, /, **kwargs) -> str:
@@ -86,6 +93,13 @@ def tr(text: str, /, **kwargs) -> str:
     ``.format`` runs only when keyword arguments are given, so source strings
     that contain literal braces are safe when called without kwargs.
     """
+    return _rebrand(tr_upstream(text, **kwargs))
+
+
+def tr_upstream(text: str, /, **kwargs) -> str:
+    """``tr`` without the brand: for the strings that are about IngeTrazo
+    itself (its history and contributors in the About box), where showing
+    Faci3D would put words in their mouth."""
     out = _catalog.get(text, text)
     if kwargs:
         try:

@@ -201,7 +201,8 @@ def _self_check() -> int:
     from core.version import __version__
 
     root = app_root()
-    print(f"IngeTrazo {__version__}")
+    from core.version import APP_NAME
+    print(f"{APP_NAME} {__version__}")
     print(f"  packaged   : {'yes' if is_frozen() else 'no (running from the repo)'}")
     print(f"  app root   : {root}")
 
@@ -211,7 +212,7 @@ def _self_check() -> int:
         ("vertex shader", root / "resources" / "shaders" / "basic.vert"),
         ("fragment shader", root / "resources" / "shaders" / "basic.frag"),
         ("translations", root / "i18n" / "es.json"),
-        ("texture library", root / "resources" / "textures" / "library.json"),
+        ("colour palette", root / "resources" / "colors" / "ral.json"),
         ("components", root / "resources" / "components" / "components.json"),
         ("app icon", root / "resources" / "icons" / "ingetrazo_256.png"),
     ):
@@ -388,8 +389,11 @@ def main() -> int:
     _configure_surface_format()
     app = _App(sys.argv)
     app.setProperty("platform_forced", platform_forced)
-    app.setApplicationName("IngeTrazo")
-    app.setOrganizationName("IngeTrazo")
+    # Faci3D keeps its settings apart from an IngeTrazo installed beside it.
+    from core.version import APP_NAME
+    app.setApplicationName(APP_NAME)
+    app.setOrganizationName(APP_NAME)
+    app.setApplicationDisplayName(APP_NAME)
     app.setProperty("gpu_pref", gpu_pref)
     # A driver that cannot serve the format we just asked for takes the
     # whole app down with it, window included — and Qt's own
@@ -431,6 +435,10 @@ def main() -> int:
     from views.tooltips import WrappingToolTips
     tooltips = WrappingToolTips(app)
     app.installEventFilter(tooltips)
+    # Faci3D: the 3D-printing interface unless the user asked for the
+    # full one (views/print_mode.py).
+    from views import print_mode
+    MainWindow.print_mode = print_mode.enabled()
     # The extensions' setup waits until the window is on screen (#440).
     window = MainWindow(defer_extensions=True)
     # From here on, a FileOpen Apple Event (macOS double-click / Open With,
@@ -446,7 +454,7 @@ def main() -> int:
     # then kills as a duplicate (the 'it doesn't open' failure). Fail-open:
     # any socket trouble just launches a normal standalone instance.
     from PySide6.QtNetwork import QLocalServer, QLocalSocket
-    _SOCKET = "ingetrazo-single-instance"
+    _SOCKET = "faci3d-single-instance"
     # File ▸ New Window starts a second IngeTrazo with --new-window: it must
     # NOT hand over to the running one like a double-click does, or the
     # new window never appears (issue #76).
@@ -524,7 +532,11 @@ def main() -> int:
     QTimer.singleShot(0, _after_first_frame)
     # Which units to work in, once the window is up (off for good with
     # «Don't show this at startup»; Preferences ▸ Units turns it back on).
-    QTimer.singleShot(0, window.offer_units_at_start)
+    if MainWindow.print_mode:
+        # Printing is in millimetres: no question to ask.
+        QTimer.singleShot(0, lambda: print_mode.ensure_print_units(window))
+    else:
+        QTimer.singleShot(0, window.offer_units_at_start)
     _offer_appimage_integration(window)
     return app.exec()
 

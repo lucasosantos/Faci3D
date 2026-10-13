@@ -199,10 +199,11 @@ def test_empty_document_raises(tmp_path):
 def _textured_quad_dae(tmp_path, image_name="brick.png"):
     """A quad textured with a real image file, split into two triangles with
     explicit TEXCOORDs (offsets 0=vertex, 1=uv) — the shape of the reference .dae."""
-    import shutil
+    from PySide6.QtGui import QImage
     img = tmp_path / image_name
-    from core.paths import app_root
-    shutil.copy(app_root() / "resources" / "textures" / "brick.png", img)
+    pic = QImage(8, 8, QImage.Format_RGB32)      # opaque: no cutout
+    pic.fill(0xFF9C4A32)
+    pic.save(str(img), "PNG")
     body = f"""<?xml version="1.0"?>
 <COLLADA {_NSDECL} version="1.4.1">
   <asset><up_axis>Z_UP</up_axis></asset>

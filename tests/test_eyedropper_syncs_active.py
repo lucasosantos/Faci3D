@@ -74,22 +74,3 @@ def test_sampled_colour_shows_in_the_active_swatch(monkeypatch):
     shown = panel._preview.pixmap().toImage()
     assert shown == _color_pixmap((0.1, 0.6, 0.2)).toImage()
     win.close()
-
-
-def test_sampled_texture_loads_the_size_fields(monkeypatch):
-    win = _window()
-    panel = win.tray.materials
-    panel._sw_box.setValue(1.0)
-    panel._sh_box.setValue(1.0)
-    panel._rot_box.setValue(0.0)
-
-    face = _quad(win)
-    face.attrs["texture"] = {"path": "/no/such/ladrillo.png",
-                             "sw": 2.5, "sh": 0.75, "rot": 30.0}
-    _sample(win, face, monkeypatch)
-
-    assert PaintTool.current_texture["sw"] == 2.5
-    assert panel._sw_box.value() == pytest.approx(2.5)
-    assert panel._sh_box.value() == pytest.approx(0.75)
-    assert panel._rot_box.value() == pytest.approx(30.0)
-    win.close()

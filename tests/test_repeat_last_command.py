@@ -87,7 +87,7 @@ def test_a_tool_comes_back_after_space(win):
 def test_select_and_context_tools_are_not_remembered(win):
     win._activate_tool("rectangle")
     win._activate_tool("select")
-    win._activate_tool("texture_position")
+    win._activate_tool("change_axes")
     win._activate_tool("select")
     win.repeat_last_command()
     assert win.viewport.active_tool is win._tools["rectangle"]

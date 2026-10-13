@@ -34,7 +34,6 @@ from PySide6.QtWidgets import (
     QGridLayout,
     QLayout,
     QHBoxLayout,
-    QInputDialog,
     QLabel,
     QLineEdit,
     QListWidget,
@@ -67,7 +66,6 @@ from tools.paint import RECENT_MAX, PaintTool
 from core.paths import app_root
 from core.units import fmt_area, fmt_len, fmt_volume
 
-_TEX_DIR = app_root() / "resources" / "textures"
 #: RAL Classic — the paint standard a drawing can be specified in. Its names
 #: are the standard's own, in the standard's own languages, so they live in
 #: the data file beside the colour instead of in the UI translations, where
@@ -202,26 +200,6 @@ def _default_pixmap(size=_SWATCH) -> QPixmap:
                              QPointF(0, size)]))
     p.end()
     return pm
-
-
-def _texture_pixmap(path, size=_SWATCH) -> QPixmap | None:
-    """A swatch of the image at *path*. Read with the allocation limit off:
-    ``QImage(path)`` refuses anything over Qt's 256 MB default, so a big
-    texture (a packaging artwork, #460) painted fine — the viewport lifts
-    the limit — but had no swatch at all."""
-    from PySide6.QtGui import QImageReader
-    limit = QImageReader.allocationLimit()
-    QImageReader.setAllocationLimit(0)
-    try:
-        reader = QImageReader(str(path))
-        reader.setAutoTransform(True)
-        img = reader.read()
-    finally:
-        QImageReader.setAllocationLimit(limit)
-    if img.isNull():
-        return None
-    return QPixmap.fromImage(img.scaled(size, size, Qt.IgnoreAspectRatio,
-                                        Qt.SmoothTransformation))
 
 
 def _swatch_button(pm: QPixmap, tip: str) -> QToolButton:
@@ -1780,14 +1758,13 @@ class PartsPanel(QWidget):
 
 
 class MaterialsPanel(QWidget):
-    """Swatch palette: pick a colour/texture to paint with."""
+    """Swatch palette: pick a colour to paint with."""
 
     COLS = 5
 
     def __init__(self, window) -> None:
         super().__init__()
         self._window = window
-        self._tile_size = 1.0
         root = QVBoxLayout(self)
         root.setContentsMargins(8, 6, 8, 8)
 
@@ -1807,103 +1784,14 @@ class MaterialsPanel(QWidget):
         default_btn.clicked.connect(self._apply_default)
         root.addLayout(row)
 
-        # The usual "edit material": tile width/height + rotation, tucked
-        # behind an Edit toggle so the panel stays clean. Edits the active
-        # texture for future paints, and Apply re-stamps the selected
-        # textured faces (undoable).
-        from PySide6.QtWidgets import QDoubleSpinBox, QToolButton
-        self._edit_toggle = QToolButton()
-        self._edit_toggle.setText(tr("Edit texture"))
-        self._edit_toggle.setCheckable(True)
-        self._edit_toggle.setArrowType(Qt.RightArrow)
-        self._edit_toggle.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
-        self._edit_toggle.setStyleSheet(
-            "QToolButton { border: none; padding: 2px; }"
-            "QToolButton:hover { background: palette(midlight); }")
-        row.addWidget(self._edit_toggle)
+        # Change the active colour in place: a named material is edited and
+        # restamped on every face that wears it; a plain colour simply
+        # becomes the next one to paint.
+        recolour = QPushButton(tr("Change…"))
+        recolour.setToolTip(tr("Change the active colour"))
+        recolour.clicked.connect(self._on_change_active)
+        row.addWidget(recolour)
         row.addWidget(default_btn)
-        self._edit_body = QWidget()
-        # Two rows, not one: tile size + rotation above, colour below. A
-        # single row with W/H/Rot/Colour/mode/Apply runs past the panel's
-        # 480 px and the labels start eliding.
-        edit_col = QVBoxLayout(self._edit_body)
-        edit_col.setContentsMargins(0, 0, 0, 0)
-        edit_col.setSpacing(3)
-        edit_row = QHBoxLayout()
-        edit_col.addLayout(edit_row)
-        edit_row.setContentsMargins(0, 0, 0, 0)
-        edit_row.addWidget(QLabel(tr("W")))
-        self._sw_box = QDoubleSpinBox()
-        self._sw_box.setRange(0.01, 1000.0)
-        self._sw_box.setDecimals(2)
-        self._sw_box.setSingleStep(0.1)
-        self._sw_box.setSuffix(" m")
-        edit_row.addWidget(self._sw_box)
-        edit_row.addWidget(QLabel(tr("H")))
-        self._sh_box = QDoubleSpinBox()
-        self._sh_box.setRange(0.01, 1000.0)
-        self._sh_box.setDecimals(2)
-        self._sh_box.setSingleStep(0.1)
-        self._sh_box.setSuffix(" m")
-        edit_row.addWidget(self._sh_box)
-        edit_row.addWidget(QLabel(tr("Rot")))
-        self._rot_box = QDoubleSpinBox()
-        self._rot_box.setRange(-360.0, 360.0)
-        self._rot_box.setDecimals(0)
-        self._rot_box.setSingleStep(15.0)
-        self._rot_box.setSuffix("°")
-        edit_row.addWidget(self._rot_box)
-        edit_row.addStretch(1)
-
-        # Colourized material (.skp format): a textured material also carries a
-        # COLOUR, and the image is re-tinted toward it. Two genuinely
-        # different pictures — Shift keeps the stone's veining and moves it
-        # in tone, Tint greyscales first and keeps only the lightness.
-        from PySide6.QtWidgets import QComboBox
-        tint_row = QHBoxLayout()
-        edit_col.addLayout(tint_row)
-        tint_row.setContentsMargins(0, 0, 0, 0)
-        #: The tint currently in the fields: RGB floats 0-1, or None.
-        self._tint = None
-        tint_row.addWidget(QLabel(tr("Color")))
-        self._tint_btn = QPushButton()
-        self._tint_btn.setFixedWidth(44)
-        self._tint_btn.setToolTip(tr("Tint the texture toward a colour"))
-        self._tint_btn.clicked.connect(self._on_pick_tint)
-        tint_row.addWidget(self._tint_btn)
-        self._tint_clear = QToolButton()
-        self._tint_clear.setText("×")
-        self._tint_clear.setToolTip(tr("Remove the colour (back to the "
-                                       "original image)"))
-        self._tint_clear.clicked.connect(self._on_clear_tint)
-        tint_row.addWidget(self._tint_clear)
-        self._tint_mode = QComboBox()
-        self._tint_mode.addItem(tr("Shift"), 0)
-        self._tint_mode.addItem(tr("Tint"), 1)
-        self._tint_mode.setToolTip(tr(
-            "Shift: move every pixel's hue toward the colour, keeping the "
-            "texture's variation. Tint: replace hue and saturation, keeping "
-            "only the lightness."))
-        tint_row.addWidget(self._tint_mode)
-        tint_row.addStretch(1)
-        apply_btn = QPushButton(tr("Apply"))
-        apply_btn.setToolTip(tr(
-            "Resize/rotate/tint the active texture; with textured faces "
-            "selected, re-stamps them (undoable)"))
-        apply_btn.clicked.connect(self._on_apply_texture_edit)
-        tint_row.addWidget(apply_btn)
-        self._edit_body.setVisible(False)
-
-        def _toggle_edit(on):
-            self._edit_body.setVisible(on)
-            self._edit_toggle.setArrowType(Qt.DownArrow if on
-                                           else Qt.RightArrow)
-            if on:
-                self._load_texture_fields()
-
-        self._edit_toggle.toggled.connect(_toggle_edit)
-        root.addWidget(self._edit_body)
-        self._load_texture_fields()
 
         # The last materials painted with, so texturing a model does not
         # mean hunting for the same brick in the library every time.
@@ -1919,19 +1807,16 @@ class MaterialsPanel(QWidget):
         self._in_model_grid = FlowLayout(spacing=2)
         root.addLayout(self._in_model_grid)
 
-        root.addWidget(self._heading(tr("Library")))
-        self._fill_library_categories(root)
+        root.addWidget(self._heading(tr("Colors")))
+        self._fill_colors(root)
 
         btns = FlowLayout(spacing=4)         # wraps in a narrow tray
         add_color = QPushButton(tr("+ Color…"))
         add_color.clicked.connect(self._add_color)
-        add_tex = QPushButton(tr("+ Texture…"))
-        add_tex.clicked.connect(self._add_texture)
         purge = QPushButton(tr("Purge"))
         purge.setToolTip(tr("Delete every material no face wears"))
         purge.clicked.connect(self._on_purge)
         btns.addWidget(add_color)
-        btns.addWidget(add_tex)
         btns.addWidget(purge)
         root.addLayout(btns)
         root.addStretch(1)
@@ -1944,136 +1829,27 @@ class MaterialsPanel(QWidget):
         theme_style(lbl, "color:{muted}; margin-top:6px; font-size:11px;")
         return lbl
 
-    # ---- Library (categorised) ------------------------------------------------
-    #: Category ids from the manifest → display names (translated).
-    CATEGORY_NAMES = {
-        "brick": "Brick", "concrete": "Concrete", "stone": "Stone",
-        "wood": "Wood", "roof": "Roofing", "floor": "Flooring",
-        "metal": "Metal", "ground": "Ground", "glass": "Glass",
-        "water": "Water",
-        # From the Sweet Home 3D texture libraries (see SOURCES.md): what a
-        # wall is finished with, and what goes inside the room.
-        "wall": "Wall", "wallpaper": "Wallpaper", "fabric": "Fabric",
-        "rug": "Rug", "sky": "Sky", "misc": "Miscellaneous",
-    }
-
-    def _fill_library_categories(self, root) -> None:
-        """Collapsible category sections fed by the bundled library manifest
-        (our own procedural set from scripts/gen_textures.py plus the Sweet
-        Home 3D libraries — see SOURCES.md), a Colours section, and any loose
-        PNGs the user dropped in resources/textures.
-
-        A section's swatches are built the first time it is OPENED. They all
-        start closed, and reading four hundred images to fill panels nobody
-        has looked at cost most of the program's start-up: 0.21 s to 0.95 s
-        when the libraries arrived. Now the cost falls on the category you
-        actually expand, once.
-        """
+    # ---- Colours ---------------------------------------------------------------
+    def _fill_colors(self, root) -> None:
+        """The colour palette: RAL Classic in code order — which is family
+        order, yellows through blacks. RAL is a paint you can actually name,
+        so a colour picked here paints as a NAMED material ("RAL 3020 Traffic
+        red") that the model and its exports carry."""
         import json as _json
-        from PySide6.QtWidgets import QToolButton
-
-        def section(title, fill=None):
-            btn = QToolButton()
-            btn.setText(f"  {title}")
-            btn.setCheckable(True)
-            btn.setChecked(False)
-            btn.setArrowType(Qt.RightArrow)
-            btn.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
-            btn.setStyleSheet(
-                "QToolButton { border: none; padding: 4px 2px;"
-                " text-align: left; }"
-                "QToolButton:hover { background: palette(midlight); }")
-            body = QWidget()
-            grid = FlowLayout(body, spacing=2)
-            grid.setContentsMargins(4, 2, 0, 4)
-            body.setVisible(False)
-
-            pending = [fill]
-
-            def toggle(on, b=btn, w=body, g=grid):
-                if on and pending[0] is not None:
-                    fn, pending[0] = pending[0], None
-                    fn(g)
-                w.setVisible(on)
-                b.setArrowType(Qt.DownArrow if on else Qt.RightArrow)
-
-            btn.toggled.connect(toggle)
-            root.addWidget(btn)
-            root.addWidget(body)
-            return grid
-
-        # ONE Colours section (the usual Colors category): RAL
-        # Classic in code order — which is family order, yellows through
-        # blacks, without carving the tray up into nine more headings to
-        # click through. The eight unnamed swatches that used to sit at the
-        # top are gone at Marco's request: beside 213 colours that each
-        # carry a reference, a nameless square is only confusing.
-        #
-        # RAL is the paint you can actually specify, so a colour picked here
-        # paints as a NAMED material ("RAL 7035 Gris claro"): what the
-        # drawing carries is a reference a painter can buy, not an RGB
-        # triple nobody can match.
         ral_colors = []
         if _RAL_FILE.exists():
             data = _json.loads(_RAL_FILE.read_text(encoding="utf-8"))
             for fam in data.get("families", []):
                 ral_colors.extend(fam.get("colors", []))
-
-        def fill_colors(grid):
-            row = 0
-            for c in ral_colors:
-                label = "%s · %s" % (c["code"], _ral_name(c))
-                b = _swatch_button(_color_pixmap(c["rgb"]), label)
-                b.clicked.connect(
-                    lambda _=False, col=c: self._apply_color(
-                        col["rgb"], "%s %s" % (col["code"], _ral_name(col))))
-                grid.addWidget(b, row // self.COLS, row % self.COLS)
-                row += 1
-
-        section("%s  (%d)" % (tr("Colors"), len(ral_colors)), fill_colors)
-
-        def fill_items(grid, items):
-            row = 0
-            for item in items:
-                path = _TEX_DIR / "library" / item["file"]
-                pm = _texture_pixmap(path)
-                if pm is None:
-                    continue
-                b = _swatch_button(pm, tr(item["name"]))
-                b.clicked.connect(
-                    lambda _=False, p=str(path), it=item:
-                    self._apply_texture(p, sw=it.get("sw"),
-                                        sh=it.get("sh"),
-                                        name=tr(it["name"]),
-                                        opacity=it.get("opacity")))
-                grid.addWidget(b, row // self.COLS, row % self.COLS)
-                row += 1
-
-        manifest = _TEX_DIR / "library.json"
-        if manifest.exists():
-            data = _json.loads(manifest.read_text(encoding="utf-8"))
-            for cat in data.get("categories", []):
-                items = cat.get("items", [])
-                if not items:
-                    continue
-                title = tr(self.CATEGORY_NAMES.get(cat["id"], cat["id"]))
-                section("%s  (%d)" % (title, len(items)),
-                        lambda g, it=items: fill_items(g, it))
-
-        def fill_loose(grid, paths):
-            for i, path in enumerate(paths):
-                pm = _texture_pixmap(path)
-                if pm is None:
-                    continue
-                b = _swatch_button(pm, path.stem)
-                b.clicked.connect(
-                    lambda _=False, p=str(path), n=path.stem:
-                    self._apply_texture(p, name=n))
-                grid.addWidget(b, i // self.COLS, i % self.COLS)
-
-        loose = sorted(_TEX_DIR.glob("*.png"))
-        if loose:
-            section(tr("Other"), lambda g, ps=loose: fill_loose(g, ps))
+        grid = FlowLayout(spacing=2)
+        root.addLayout(grid)
+        for row, c in enumerate(ral_colors):
+            label = "%s · %s" % (c["code"], _ral_name(c))
+            b = _swatch_button(_color_pixmap(c["rgb"]), label)
+            b.clicked.connect(
+                lambda _=False, col=c: self._apply_color(
+                    col["rgb"], "%s %s" % (col["code"], _ral_name(col))))
+            grid.addWidget(b, row // self.COLS, row % self.COLS)
 
     def _on_purge(self) -> None:
         """Sweep the registry materials no face wears.
@@ -2123,8 +1899,6 @@ class MaterialsPanel(QWidget):
                 w.setParent(None)
                 w.deleteLater()
         colors: dict = {}
-        textures: dict = {}
-        opacities: dict = {}   # texture path → translucency (glass)
         names: dict = {}     # swatch key → material name (registry identity)
         scene = self._window.viewport.scene
 
@@ -2142,19 +1916,11 @@ class MaterialsPanel(QWidget):
 
         for attrs in in_use():
             mat = attrs.get("mat")
-            tex = attrs.get("texture")
-            if tex and tex.get("path"):
-                textures.setdefault(tex["path"], tex)
-                if attrs.get("opacity") is not None:
-                    opacities.setdefault(tex["path"], attrs.get("opacity"))
+            col = attrs.get("color")
+            if col is not None:
+                colors[tuple(col)] = col
                 if mat:
-                    names.setdefault(("t", tex["path"]), mat)
-            else:
-                col = attrs.get("color")
-                if col is not None:
-                    colors[tuple(col)] = col
-                    if mat:
-                        names.setdefault(("c", tuple(col)), mat)
+                    names.setdefault(("c", tuple(col)), mat)
         i = 0
         for col in colors.values():
             # A named material shows its NAME (the registry identity the
@@ -2172,22 +1938,6 @@ class MaterialsPanel(QWidget):
                 b.customContextMenuRequested.connect(
                     lambda _pos, n=name, c=tuple(col), w=b:
                     self._swatch_menu(w, n, color=c))
-            self._in_model_grid.addWidget(b, i // self.COLS, i % self.COLS)
-            i += 1
-        for path, tex in textures.items():
-            pm = _texture_pixmap(path)
-            if pm is None:
-                continue
-            t_name = names.get(("t", path))
-            b = _swatch_button(pm, t_name or Path(path).stem)
-            b.clicked.connect(
-                lambda _=False, t=dict(tex), n=t_name,
-                o=opacities.get(path): self._apply_texture(
-                    t["path"], t.get("sw", 1.0), name=n, opacity=o))
-            if t_name:
-                b.setContextMenuPolicy(Qt.CustomContextMenu)
-                b.customContextMenuRequested.connect(
-                    lambda _pos, n=t_name, w=b: self._swatch_menu(w, n))
             self._in_model_grid.addWidget(b, i // self.COLS, i % self.COLS)
             i += 1
         if bar is not None and keep is not None:
@@ -2290,118 +2040,16 @@ class MaterialsPanel(QWidget):
         return existing or Material(name, color=color, texture=texture,
                                     opacity=opacity)
 
-    def _load_texture_fields(self) -> None:
-        tex = PaintTool.current_texture
-        if tex:
-            self._sw_box.setValue(float(tex.get("sw", 1.0)))
-            self._sh_box.setValue(float(tex.get("sh", 1.0)))
-            self._rot_box.setValue(float(tex.get("rot", 0.0)))
-            # The tint has to load too: otherwise opening the panel and
-            # pressing Apply to nudge the tile size would silently strip a
-            # colour the user set earlier.
-            tint = tex.get("tint")
-            self._tint = tuple(tint) if tint else None
-            mode = int(tex.get("tint_mode", 0) or 0)
-            self._tint_mode.setCurrentIndex(1 if mode == 1 else 0)
-        else:
-            self._sw_box.setValue(self._tile_size)
-            self._sh_box.setValue(self._tile_size)
-            self._rot_box.setValue(0.0)
-            self._tint = None
-        self._refresh_tint_swatch()
-
-    def _refresh_tint_swatch(self) -> None:
-        """The colour button wears the tint (or reads "—" when there is
-        none), so the panel says at a glance whether this texture carries
-        one."""
-        if getattr(self, "_tint_btn", None) is None:
+    def _on_change_active(self) -> None:
+        """«Change…»: pick a new value for the active colour."""
+        if PaintTool.current_is_default:
+            self._add_color()
             return
-        if self._tint is None:
-            self._tint_btn.setText("—")
-            self._tint_btn.setStyleSheet("")
-            self._tint_clear.setEnabled(False)
-            self._tint_mode.setEnabled(False)
-            return
-        r, g, b = (int(round(c * 255)) for c in self._tint[:3])
-        self._tint_btn.setText("")
-        self._tint_btn.setStyleSheet(
-            f"background: rgb({r},{g},{b}); border: 1px solid #555;")
-        self._tint_clear.setEnabled(True)
-        self._tint_mode.setEnabled(True)
-
-    def _on_pick_tint(self) -> None:
-        base = self._tint or (0.7, 0.7, 0.7)
-        colour_only = not PaintTool.current_texture
-        if colour_only and self._tint is None and \
-                not PaintTool.current_is_default:
-            base = PaintTool.current_color
-        chosen = get_color(
-            QColor.fromRgbF(*base[:3]), self,
-            tr("Colour") if colour_only else tr("Tint the texture"))
-        if not chosen.isValid():
-            return
-        rgb = (chosen.redF(), chosen.greenF(), chosen.blueF())
-        if colour_only and self._recolour_active(rgb):
-            # A plain colour changes at once: nothing to tint, no Apply.
+        chosen = get_color(QColor.fromRgbF(*PaintTool.current_color[:3]),
+                           self, tr("Color"))
+        if chosen.isValid() and self._recolour_active(
+                (chosen.redF(), chosen.greenF(), chosen.blueF())):
             self._refresh_preview()
-            return
-        self._tint = rgb
-        if not self._tint_mode.isEnabled():
-            self._tint_mode.setEnabled(True)
-        self._refresh_tint_swatch()
-
-    def _on_clear_tint(self) -> None:
-        self._tint = None
-        self._refresh_tint_swatch()
-
-    def _retinted(self, tex: dict) -> dict:
-        """*tex* with the panel's colour applied (or removed).
-
-        Always re-tints from the entry's untinted ``base``, never from the
-        last result, so sliding through colours cannot degrade the image."""
-        from core.texture import tinted_texture, untinted_texture
-        if self._tint is None:
-            return untinted_texture(tex)
-        mode = self._tint_mode.currentData()
-        return tinted_texture(tex, self._tint,
-                              int(mode if mode is not None else 0))
-
-    def _on_apply_texture_edit(self) -> None:
-        """Push the W/H/Rot fields onto the active texture and onto any
-        selected textured faces (one undoable step)."""
-        from core.history import SetFaceTextureCommand
-        sw = self._sw_box.value()
-        sh = self._sh_box.value()
-        rot = self._rot_box.value() % 360.0
-        if PaintTool.current_texture:
-            PaintTool.current_texture = self._retinted({
-                **PaintTool.current_texture, "sw": sw, "sh": sh, "rot": rot})
-        scene = self._window.viewport.scene
-        targets = [f for f in scene.selection
-                   if isinstance(f, Face) and f.attrs.get("texture")]
-        if targets:
-            # Each face keeps its own image; size/rotation and the tint change.
-            from core.history import CompoundCommand
-            cmds = []
-            for f in targets:
-                tex = self._retinted({**f.attrs["texture"], "sw": sw,
-                                      "sh": sh, "rot": rot})
-                cmds.append(SetFaceTextureCommand([f], tex))
-            cmd = cmds[0] if len(cmds) == 1 else CompoundCommand(cmds)
-            self._window.viewport.history.execute(cmd)
-            self._window.viewport.update()
-            self._window.statusBar().showMessage(
-                tr("Texture updated on {n} faces", n=len(targets)), 2500)
-        elif not PaintTool.current_texture:
-            # A plain colour is active: the Color row changes IT — the
-            # place everyone looks for (Marco, testing 0.5.7, tinted a
-            # colour material here and nothing happened: tinting needs a
-            # texture, and the right-click edit was out of sight).
-            if not self._recolour_active(self._tint):
-                self._window.statusBar().showMessage(
-                    tr("Pick a texture (or select textured faces) first"),
-                    2500)
-        self._refresh_preview()
 
     def _recolour_active(self, rgb) -> bool:
         """Give the active plain colour ``rgb``: a named material is edited
@@ -2436,23 +2084,6 @@ class MaterialsPanel(QWidget):
             tr("Active colour changed — click faces to paint it"), 3000)
         return True
 
-    def _apply_texture(self, path: str, size: float | None = None,
-                       sw: float | None = None,
-                       sh: float | None = None,
-                       name: str | None = None,
-                       opacity: float | None = None) -> None:
-        w = sw if sw is not None else (size or self._tile_size)
-        h = sh if sh is not None else (size or self._tile_size)
-        PaintTool.current_is_default = False
-        PaintTool.current_texture = {"path": path, "sw": w, "sh": h,
-                                     "rot": 0.0}
-        PaintTool.current_opacity = opacity
-        PaintTool.current_material = self._material_for(
-            name, texture=dict(PaintTool.current_texture), opacity=opacity)
-        self._window._activate_tool("paint")
-        self._load_texture_fields()
-        self._refresh_preview()
-
     def _add_color(self) -> None:
         r, g, b = PaintTool.current_color
         chosen = get_color(QColor.fromRgbF(r, g, b), self, tr("Color"))
@@ -2464,21 +2095,6 @@ class MaterialsPanel(QWidget):
             self._apply_color(
                 (chosen.redF(), chosen.greenF(), chosen.blueF()),
                 name=name.strip() if ok and name.strip() else None)
-
-    def _add_texture(self) -> None:
-        path_str, _ = file_dialogs.getOpenFileName(
-            self, tr("Choose texture"), str(_TEX_DIR),
-            tr("Images (*.png *.jpg *.jpeg *.bmp);;All (*)"))
-        if not path_str:
-            return
-        size, ok = QInputDialog.getDouble(
-            self, tr("Texture size"), tr("Real tile size (meters):"),
-            self._tile_size, 0.001, 1000.0, 3)
-        if not ok:
-            return
-        self._tile_size = size
-        # A texture picked from disk is a material named after its file.
-        self._apply_texture(path_str, size, name=Path(path_str).stem)
 
     # ---- Recent ----------------------------------------------------------
     def recent_materials_changed(self) -> None:
@@ -2494,14 +2110,10 @@ class MaterialsPanel(QWidget):
                 w.setParent(None)
                 w.deleteLater()
         for entry in PaintTool.recent:
-            tex = entry.get("texture")
-            pm = (_texture_pixmap(tex["path"]) if tex
-                  else _color_pixmap(tuple(entry.get("color") or (1, 1, 1))))
-            if pm is None:
+            if entry.get("texture") or not entry.get("color"):
                 continue
-            label = entry.get("mat") or (
-                Path(tex["path"]).stem if tex else tr("Color"))
-            b = _swatch_button(pm, label)
+            pm = _color_pixmap(tuple(entry["color"]))
+            b = _swatch_button(pm, entry.get("mat") or tr("Color"))
             b.clicked.connect(lambda _=False, e=entry: self._apply_recent(e))
             self._recent_grid.addWidget(b)
         shown = self._recent_grid.count() > 0
@@ -2509,32 +2121,22 @@ class MaterialsPanel(QWidget):
 
     def _apply_recent(self, entry: dict) -> None:
         """Make a recent material the active paint, exactly as it was
-        painted: image with its size, turn and tint, or the colour; its
-        translucency and its name."""
-        tex = entry.get("texture")
+        painted: its colour, translucency and name."""
         PaintTool.current_is_default = False
+        PaintTool.current_texture = None
         PaintTool.current_texture_plane = None
-        if tex:
-            PaintTool.current_texture = dict(tex)
-        else:
-            PaintTool.current_texture = None
-            PaintTool.current_color = tuple(entry.get("color") or (1, 1, 1))
+        PaintTool.current_color = tuple(entry.get("color") or (1, 1, 1))
         PaintTool.current_opacity = entry.get("opacity")
         PaintTool.current_material = self._material_for(
-            entry.get("mat"),
-            color=None if tex else PaintTool.current_color,
-            texture=dict(tex) if tex else None,
+            entry.get("mat"), color=PaintTool.current_color,
             opacity=entry.get("opacity"))
         self._window._activate_tool("paint")
-        self._load_texture_fields()
         self._refresh_preview()
 
     def sync_from_paint(self) -> None:
         """Mirror what the Paint tool holds NOW — called after the
-        eyedropper sampled a face, so the «Activo» swatch and the size
-        fields say what the next click will paint (issue #47)."""
-        if PaintTool.current_texture is not None:
-            self._load_texture_fields()
+        eyedropper sampled a face, so the «Activo» swatch says what the
+        next click will paint (issue #47)."""
         self._refresh_preview()
 
     def _apply_default(self) -> None:
@@ -2554,11 +2156,6 @@ class MaterialsPanel(QWidget):
             self._preview.setToolTip(tr("Default material (no material)"))
             return
         self._preview.setToolTip("")
-        if PaintTool.current_texture is not None:
-            pm = _texture_pixmap(PaintTool.current_texture["path"])
-            if pm is not None:
-                self._preview.setPixmap(pm)
-                return
         self._preview.setPixmap(_color_pixmap(PaintTool.current_color))
 
 
@@ -2566,8 +2163,8 @@ _RECENT_KEY = "paint/recent_materials"
 
 
 def load_recent_materials() -> list[dict]:
-    """The «Recent» materials saved by the last session. An image that is
-    gone from disk (an import's temporary folder) is dropped."""
+    """The «Recent» colours saved by the last session. Textured entries
+    (from before Faci3D painted in colours only) are dropped."""
     import json
     raw = QSettings().value(_RECENT_KEY) or ""
     try:
@@ -2576,11 +2173,7 @@ def load_recent_materials() -> list[dict]:
         return []
     out = []
     for e in data if isinstance(data, list) else []:
-        if not isinstance(e, dict) or not (e.get("texture") or e.get("color")):
-            continue
-        tex = e.get("texture")
-        if tex and not (isinstance(tex, dict) and tex.get("path")
-                        and Path(tex["path"]).exists()):
+        if not isinstance(e, dict) or e.get("texture") or not e.get("color"):
             continue
         out.append(e)
     return out[:RECENT_MAX]

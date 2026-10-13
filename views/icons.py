@@ -1807,8 +1807,44 @@ def _first_person(p, ink):
         p.drawPath(cap)
 
 
+def _bed_plate(p, ink):
+    """The print bed seen from a corner above: a flat parallelogram."""
+    p.save()
+    p.setBrush(Qt.NoBrush)
+    p.drawPolygon(QPolygonF([QPointF(6, 38), QPointF(30, 38),
+                             QPointF(42, 30), QPointF(18, 30)]))
+    p.restore()
+
+
+def _place_on_bed(p, ink):
+    # Faci3D: a box set down on the bed, the arrow saying which way.
+    _bed_plate(p, ink)
+    p.setBrush(Qt.NoBrush)
+    p.drawRect(QRectF(16, 19, 12, 12))
+    p.save()
+    p.setPen(_rpen(_accent(), 3.0))
+    p.drawLine(QPointF(22, 4), QPointF(22, 14))
+    p.drawLine(QPointF(18, 10), QPointF(22, 14))
+    p.drawLine(QPointF(26, 10), QPointF(22, 14))
+    p.restore()
+
+
+def _center_on_bed(p, ink):
+    # Faci3D: a box in the middle of the bed, the centre marks on the plate.
+    _bed_plate(p, ink)
+    p.setBrush(Qt.NoBrush)
+    p.drawRect(QRectF(18, 16, 12, 12))
+    p.save()
+    p.setPen(_rpen(_accent(), 3.0))
+    p.drawLine(QPointF(4, 34), QPointF(10, 34))
+    p.drawLine(QPointF(38, 34), QPointF(44, 34))
+    p.drawLine(QPointF(24, 41), QPointF(24, 45))
+    p.restore()
+
+
 _DRAW = {
     **_SOLID_ICONS,
+    "place_on_bed": _place_on_bed, "center_on_bed": _center_on_bed,
     "select": _select, "line": _line, "freehand": _freehand,
     "side_collapse": _side_collapse,
     "overflow_h": _overflow_h, "overflow_v": _overflow_v,

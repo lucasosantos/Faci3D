@@ -33,8 +33,9 @@ _AUTO_NAME = re.compile(r"^Group \d+$")
 
 
 def is_scale_figure(group) -> bool:
-    """The app's own scale figure (Sumari), which every fresh document
-    starts with: a face-me whose image is the bundled ``sumari.png``.
+    """The app's own scale figure (Sumari, or Faci3D's potted plant), which
+    every fresh document starts with: a face-me whose image is the bundled
+    ``sumari.png`` or ``plant_pot.png``.
     Named "Sumari" by the app, but an older file carries no group names,
     so the picture is what identifies it."""
     if not getattr(group, "billboard", False):
@@ -44,7 +45,7 @@ def is_scale_figure(group) -> bool:
     for f in group.mesh.faces:
         tex = (f.attrs or {}).get("texture") or {}
         path = str(tex.get("path", "")).replace("\\", "/")
-        if path.rsplit("/", 1)[-1].endswith("sumari.png"):
+        if path.rsplit("/", 1)[-1].endswith(("sumari.png", "plant_pot.png")):
             return True
     return False
 

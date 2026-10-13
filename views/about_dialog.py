@@ -23,7 +23,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from core.i18n import tr
+from core.i18n import tr, tr_upstream
 
 #: (name, what they gave — English source for tr(), link or "").
 CONTRIBUTORS = [
@@ -102,7 +102,10 @@ def _credits_html(people) -> str:
     for name, role, link in people:
         who = (f"<a href='{link}'><b>{name}</b></a>" if link
                else f"<b>{name}</b>")
-        rows.append(f"<p style='margin:0 0 10px 0'>{who}<br>{tr(role)}</p>")
+        # IngeTrazo's contributors, for what they gave IngeTrazo: their
+        # credit keeps the upstream name.
+        rows.append(f"<p style='margin:0 0 10px 0'>{who}<br>"
+                    f"{tr_upstream(role)}</p>")
     return "".join(rows)
 
 
@@ -241,16 +244,22 @@ class AboutDialog(QDialog):
         # The top is one compact block, so the credits below get the room
         # (Marco, 23-09).
         gl = f"<br><small>OpenGL: {gl_line}</small>" if gl_line else ""
-        para("<b style='font-size:15px'>IngeTrazo</b> "
+        # Faci3D on top; below it, the program it is built on and the
+        # people who made that one — GPL attribution, and simply the truth.
+        from core.version import APP_NAME
+        para(f"<b style='font-size:15px'>{APP_NAME}</b> "
              f"{tr('Version')} {version}{gl}<br>"
-             f"{tr('Free 3D modeler for architecture, engineering and 3D design.')}<br>"
-             f"{tr('Created by')} <b>Marco Sumari Tellez</b> — "
-             f"{tr('Civil Engineer — Arequipa, Peru')}")
-        head = para(f"<b>{tr('With contributions from')}</b>")
+             f"{tr('3D modelling for 3D printing, simple and free.')}<br>"
+             + tr_upstream("Built on IngeTrazo, the free 3D modeler created "
+                           "by {name}.",
+                           name="<b>Marco Sumari Tellez</b>")
+             + f" {tr('Civil Engineer — Arequipa, Peru')}")
+        head = para("<b>" + tr_upstream("IngeTrazo was made with "
+                                        "contributions from") + "</b>")
         head.setContentsMargins(0, 8, 0, 0)
         self.credits = _Credits(CONTRIBUTORS, self)
         col.addWidget(self.credits)
-        para(f"<small>{tr('And thanks to everyone who tries IngeTrazo and reports what they find.')}</small>")
+        para(f"<small>{tr_upstream('And thanks to everyone who tries IngeTrazo and reports what they find.')}</small>")
         para(f"<small>{tr('Licensed under GPL-3.0-or-later.')} · "
              "<a href='https://github.com/ingelibre/ingetrazo'>"
              "github.com/ingelibre/ingetrazo</a></small>")
