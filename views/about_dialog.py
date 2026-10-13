@@ -246,12 +246,12 @@ class AboutDialog(QDialog):
         gl = f"<br><small>OpenGL: {gl_line}</small>" if gl_line else ""
         # Faci3D on top; below it, the program it is built on and the
         # people who made that one — GPL attribution, and simply the truth.
-        from core.version import APP_NAME
+        from core.version import APP_NAME, ENGINE_VERSION
         para(f"<b style='font-size:15px'>{APP_NAME}</b> "
              f"{tr('Version')} {version}{gl}<br>"
              f"{tr('3D modelling for 3D printing, simple and free.')}<br>"
-             + tr_upstream("Built on IngeTrazo, the free 3D modeler created "
-                           "by {name}.",
+             + tr_upstream("Built on IngeTrazo {engine}, the free 3D modeler "
+                           "created by {name}.", engine=ENGINE_VERSION,
                            name="<b>Marco Sumari Tellez</b>")
              + f" {tr('Civil Engineer — Arequipa, Peru')}")
         head = para("<b>" + tr_upstream("IngeTrazo was made with "

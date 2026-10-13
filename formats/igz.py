@@ -51,7 +51,7 @@ import json
 import math
 from pathlib import Path
 
-from core.version import __version__
+from core.version import APP_NAME, ENGINE_VERSION, __version__
 
 from PySide6.QtGui import QVector3D
 
@@ -661,6 +661,10 @@ def save_scene(scene, path: Path) -> dict:
         "igz_format": (GEOMETRY_FORMAT if geom else
                        CONTAINER_FORMAT if blobs else PLAIN_FORMAT),
         "app_version": __version__,
+        # Faci3D: who wrote it, and on which IngeTrazo engine (readers
+        # ignore keys they do not know).
+        "app": APP_NAME,
+        "engine_version": ENGINE_VERSION,
         "scene": payload,
     }
     try:

@@ -1,5 +1,7 @@
 name: Build Windows
 
+# Faci3D: installer (Inno Setup) + portable zip, unsigned.
+
 # Cuándo corre:
 #   - Push de un tag vX.Y.Z  → build + adjunta los binarios al Release
 #   - Manual desde la pestaña Actions (workflow_dispatch)
@@ -8,14 +10,6 @@ on:
     tags:
       - 'v*'
   workflow_dispatch:
-    inputs:
-      publicar:
-        description: >-
-          Archivos para publicar (reemplazar en una release): nunca con la
-          firma de prueba, que Windows no reconoce y que Smart App Control
-          puede bloquear (#566)
-        type: boolean
-        default: false
 
 # El GITHUB_TOKEN necesita esto para adjuntar archivos al release.
 permissions:
@@ -124,104 +118,44 @@ jobs:
           ./dist/ingetrazo/ingetrazo.exe --check
           echo "bundle OK"
 
-      # ── Firma (SignPath Foundation, org «IngeTrazo [OSS]») ─────────────
-      # Cada firma espera a que Marco la apruebe en app.signpath.io. Sin el
-      # secret (forks) se salta y sale sin firmar, como antes. El secret
-      # solo lo ve este paso y el de SignPath, no pip ni PyInstaller.
-      # La política va en la variable SIGNPATH_POLICY del repo:
-      # test-signing hasta que llegue el certificado de release (08-10 en
-      # «CSR pending»), luego release-signing.
-      - name: ¿Hay firma?
-        id: firma
-        shell: bash
-        env:
-          TOKEN: ${{ secrets.SIGNPATH_API_TOKEN }}
-          POLICY: ${{ vars.SIGNPATH_POLICY }}
-          PUBLICAR: ${{ inputs.publicar }}
-        run: |
-          if [ -z "$TOKEN" ]; then
-            echo "Sin SIGNPATH_API_TOKEN: sale sin firmar"
-          elif [[ ( "$GITHUB_REF" == refs/tags/* || "$PUBLICAR" == true ) && "$POLICY" != release-signing ]]; then
-            # (Lanzado a mano con «publicar»: igual que un tag. Los archivos
-            # de la 0.5.8 se reemplazaron con builds a mano y salieron con
-            # el certificado de prueba, #566.)
-            # Una release con el certificado de prueba no sirve: Windows no
-            # confía en él. Mejor sin firmar, como antes.
-            echo "::warning::Release sin SIGNPATH_POLICY=release-signing: sale sin firmar"
-          else
-            echo "on=true" >> "$GITHUB_OUTPUT"
-          fi
-
-      - name: Subir los .exe para firmar
-        id: exe-sin-firmar
-        if: steps.firma.outputs.on == 'true'
-        uses: actions/upload-artifact@v4
-        with:
-          name: exe-sin-firmar
-          path: |
-            dist/ingetrazo/ingetrazo.exe
-            dist/ingetrazo/ingetrazo-mcp.exe
-          if-no-files-found: error
-          retention-days: 1
-
-      # Configuración «programa» en SignPath: los dos .exe en la raíz del zip.
-      # Los firmados reemplazan a los de dist/ingetrazo/ antes del ZIP y de
-      # Inno Setup, así ambos llevan los .exe firmados.
-      - name: Firmar los .exe (SignPath)
-        if: steps.firma.outputs.on == 'true'
-        uses: signpath/github-action-submit-signing-request@v1
-        with:
-          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
-          organization-id: 45ff474d-922e-4e28-bc0a-837061f69143
-          project-slug: ingetrazo
-          signing-policy-slug: ${{ vars.SIGNPATH_POLICY || 'test-signing' }}
-          artifact-configuration-slug: programa
-          github-artifact-id: ${{ steps.exe-sin-firmar.outputs.artifact-id }}
-          wait-for-completion: true
-          wait-for-completion-timeout-in-seconds: 3600
-          output-artifact-directory: dist/ingetrazo
-
-      - name: Incluir LEEME en el bundle
+      - name: Incluir LEIA-ME en el bundle
         shell: bash
         run: |
-          cat > dist/ingetrazo/LEEME.txt <<'EOF'
-          IngeTrazo para Windows
+          cat > dist/ingetrazo/LEIA-ME.txt <<'EOF'
+          Faci3D para Windows
 
-          Recomendado: usar el INSTALADOR (ingetrazo-setup-vX.Y.Z.exe).
-          Este .zip es la version portable para usuarios tecnicos.
+          Recomendado: usar o INSTALADOR (faci3d-setup-vX.Y.Z.exe).
+          Este .zip e a versao portatil.
 
-          === Modo portable (este .zip) ===
+          === Modo portatil (este .zip) ===
 
-          1. Descomprimi esta carpeta donde quieras (ej. C:\IngeTrazo\)
-          2. Doble clic en ingetrazo.exe
-          3. Si Windows muestra "Windows protegio tu PC" → "Mas informacion"
-             → "Ejecutar de todas formas" (falta firma digital; se agrega
-             mas adelante).
+          1. Descompacte esta pasta onde quiser (ex.: C:\Faci3D\)
+          2. Clique duas vezes em ingetrazo.exe
+          3. Se o Windows mostrar "O Windows protegeu o computador" ->
+             "Mais informacoes" -> "Executar assim mesmo" (o programa
+             ainda nao tem assinatura digital).
 
-          Las preferencias se guardan en el registro de Windows y el cache
-          de teselas en %LOCALAPPDATA%\IngeTrazo\.
-
-          Si al abrir falla con "Failed to load python312.dll", instala:
+          Se ao abrir aparecer "Failed to load python312.dll", instale:
             https://aka.ms/vs/17/release/vc_redist.x64.exe
-            (Visual C++ Redistributable, oficial de Microsoft).
+            (Visual C++ Redistributable, oficial da Microsoft).
 
-          IngeTrazo es software libre (GPL-3.0).
-          Codigo y soporte: https://github.com/tuxiasumari/ingetrazo
+          Faci3D e software livre (GPL-3.0), baseado no IngeTrazo.
+          Codigo e suporte: https://github.com/lucasosantos/Faci3D
           EOF
 
       - name: Crear ZIP portable
         shell: pwsh
         run: |
-          Compress-Archive -Path dist/ingetrazo -DestinationPath dist/ingetrazo-windows.zip
+          Compress-Archive -Path dist/ingetrazo -DestinationPath dist/faci3d-windows.zip
 
-      - name: Extraer versión (del tag o de core/version.py)
+      - name: Versión (core/version.py; la tag debe coincidir)
         id: ver
         shell: bash
         run: |
-          if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
-            VERSION="${GITHUB_REF#refs/tags/v}"
-          else
-            VERSION=$(grep '^__version__' core/version.py | cut -d'"' -f2)
+          VERSION=$(grep '^__version__' core/version.py | cut -d'"' -f2)
+          if [[ "${GITHUB_REF}" == refs/tags/v* && "${GITHUB_REF#refs/tags/v}" != "$VERSION" ]]; then
+            echo "::error::A tag ${GITHUB_REF_NAME} não bate com core/version.py ($VERSION)"
+            exit 1
           fi
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "Version: $VERSION"
@@ -240,44 +174,6 @@ jobs:
           & $iscc "/DMyAppVersion=${{ steps.ver.outputs.version }}" "installer\ingetrazo.iss"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
-      - name: Subir el instalador para firmar
-        id: setup-sin-firmar
-        if: steps.firma.outputs.on == 'true'
-        uses: actions/upload-artifact@v4
-        with:
-          name: setup-sin-firmar
-          path: dist/ingetrazo-setup-v*.exe
-          if-no-files-found: error
-          retention-days: 1
-
-      # Configuración «instalador» en SignPath.
-      - name: Firmar el instalador (SignPath)
-        if: steps.firma.outputs.on == 'true'
-        uses: signpath/github-action-submit-signing-request@v1
-        with:
-          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
-          organization-id: 45ff474d-922e-4e28-bc0a-837061f69143
-          project-slug: ingetrazo
-          signing-policy-slug: ${{ vars.SIGNPATH_POLICY || 'test-signing' }}
-          artifact-configuration-slug: instalador
-          github-artifact-id: ${{ steps.setup-sin-firmar.outputs.artifact-id }}
-          wait-for-completion: true
-          wait-for-completion-timeout-in-seconds: 3600
-          output-artifact-directory: dist
-
-      # Con test-signing la firma existe pero Windows no confía en ella
-      # (Status ≠ Valid): aquí solo se mira que el .exe lleve firma.
-      - name: Comprobar las firmas
-        if: steps.firma.outputs.on == 'true'
-        shell: pwsh
-        run: |
-          $files = @("dist/ingetrazo/ingetrazo.exe", "dist/ingetrazo/ingetrazo-mcp.exe") + (Get-ChildItem dist/ingetrazo-setup-v*.exe).FullName
-          foreach ($f in $files) {
-            $sig = Get-AuthenticodeSignature $f
-            "{0}: {1} — {2}" -f (Split-Path $f -Leaf), $sig.Status, $sig.SignerCertificate.Subject
-            if (-not $sig.SignerCertificate) { Write-Error "$f sin firma"; exit 1 }
-          }
-
       - name: Listar archivos generados
         shell: bash
         run: ls -lh dist/
@@ -285,10 +181,10 @@ jobs:
       - name: Subir artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: ingetrazo-windows
+          name: faci3d-windows
           path: |
-            dist/ingetrazo-windows.zip
-            dist/ingetrazo-setup-v*.exe
+            dist/faci3d-windows.zip
+            dist/faci3d-setup-v*.exe
           retention-days: 7
 
       # En push de tag: adjunta los binarios al Release de esa versión.
@@ -297,5 +193,5 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            dist/ingetrazo-windows.zip
-            dist/ingetrazo-setup-v*.exe
+            dist/faci3d-windows.zip
+            dist/faci3d-setup-v*.exe

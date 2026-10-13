@@ -303,3 +303,19 @@ def test_the_about_box_credits_ingetrazo():
     assert "Faci3D" in dlg.windowTitle()
     assert "IngeTrazo" in text and "Marco Sumari Tellez" in text
     dlg.deleteLater()
+
+
+def test_faci3d_versions_itself_but_extensions_measure_the_engine():
+    from core import extension_manager as manager
+    from core.version import ENGINE_VERSION, __version__
+    assert __version__ == "0.1.0"
+    assert ENGINE_VERSION == "0.5.8"
+    base = manager.bundled_extensions()
+    assert base, "the bundled extensions are listed"
+    ext = base[0]
+    # An extension written for IngeTrazo 0.5 still fits: compatibility is
+    # measured against the engine, not against Faci3D's 0.1.0.
+    fits = manager.Extension(**{**ext.__dict__, "minimum_version": "0.5.0"})
+    assert manager.compatible_with_current(fits)
+    too_new = manager.Extension(**{**ext.__dict__, "minimum_version": "9.0"})
+    assert not manager.compatible_with_current(too_new)

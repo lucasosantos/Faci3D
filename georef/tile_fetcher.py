@@ -27,9 +27,9 @@ from georef.tiles import TileCache, TileSource, default_cache_dir  # noqa: F401 
 
 # Slippy-map etiquette: identify the client and don't hammer servers. OSM's
 # usage policy in particular requires a real User-Agent.
-from core.version import __version__
+from core.version import ENGINE_VERSION
 
-_USER_AGENT = (f"IngeTrazo/{__version__} (https://github.com/ingelibre/ingetrazo)").encode()
+_USER_AGENT = (f"IngeTrazo/{ENGINE_VERSION} (https://github.com/ingelibre/ingetrazo)").encode()
 
 
 class TileFetcher(QObject):

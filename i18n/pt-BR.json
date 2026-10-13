@@ -2916,7 +2916,7 @@
  "Show print bed": "Mostrar mesa de impressão",
  "Plant pot": "Vaso de planta",
  "3D modelling for 3D printing, simple and free.": "Modelagem 3D para impressão 3D, simples e livre.",
- "Built on IngeTrazo, the free 3D modeler created by {name}.": "Baseado no IngeTrazo, o modelador 3D livre criado por {name}.",
+ "Built on IngeTrazo {engine}, the free 3D modeler created by {name}.": "Baseado no IngeTrazo {engine}, o modelador 3D livre criado por {name}.",
  "IngeTrazo was made with contributions from": "O IngeTrazo foi feito com contribuições de",
  "SVG drawing (.svg)…": "Desenho SVG (.svg)…",
  "Bring in a 2D drawing — a logo, a name, an outline — as flat faces on the ground, ready for Push/Pull.": "Traz um desenho 2D — um logo, um nome, um contorno — como faces planas no chão, prontas para Empurrar / Puxar.",

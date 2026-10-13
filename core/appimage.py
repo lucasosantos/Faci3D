@@ -68,16 +68,17 @@ def _desktop_entry(appimage: Path) -> str:
     return (
         "[Desktop Entry]\n"
         "Type=Application\n"
-        "Name=IngeTrazo\n"
+        "Name=Faci3D\n"
         "GenericName=3D Modeler\n"
         "GenericName[es]=Modelador 3D\n"
-        "Comment=Free 3D modeler for civil engineering and architecture\n"
-        "Comment[es]=Modelador 3D libre para ingeniería civil y arquitectura\n"
+        "Comment=Simple, free 3D modeler for 3D printing\n"
+        "Comment[es]=Modelador 3D libre y sencillo para impresión 3D\n"
+        "Comment[pt_BR]=Modelador 3D livre e simples para impressão 3D\n"
         f'Exec="{exe}" %f\n'
         f'TryExec={exe}\n'
         "Icon=ingetrazo\n"
         "Terminal=false\n"
-        "Categories=Graphics;3DGraphics;Engineering;\n"
+        "Categories=Graphics;3DGraphics;\n"
         "MimeType=application/x-ingetrazo;model/vnd.collada+xml;application/vnd.sketchup.skp;\n"
         "StartupWMClass=ingetrazo\n"
         "X-AppImage-Integrated=true\n"

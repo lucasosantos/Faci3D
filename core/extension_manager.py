@@ -21,7 +21,7 @@ from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
 
 from core.extensions import user_plugins_dir
-from core.version import USER_AGENT, __version__
+from core.version import ENGINE_VERSION, USER_AGENT
 
 CATALOG_URL = (
     "https://raw.githubusercontent.com/ingelibre/"
@@ -493,7 +493,7 @@ def bundled_extensions() -> list[Extension]:
     from the local copy, managed like a catalog one from then on (update,
     disable, uninstall). A catalog entry with the same id wins over it."""
     from core.i18n import current_language, tr
-    from core.version import __version__
+    from core.version import ENGINE_VERSION
     lang = current_language().lower().replace("_", "-").split("-", 1)[0]
     out = []
     for path, title, _blurb, tagline in _example_entries():
@@ -503,9 +503,9 @@ def bundled_extensions() -> list[Extension]:
         except OSError:
             continue
         out.append(Extension(
-            id=ident, version=__version__, author="IngeTrazo", license="",
+            id=ident, version=ENGINE_VERSION, author="IngeTrazo", license="",
             repository="", download="", sha256=digest,
-            minimum_version=__version__, name={"en": title},
+            minimum_version=ENGINE_VERSION, name={"en": title},
             summary={"en": tagline, lang: tr(tagline)}, tags=(),
             screenshot=_example_screenshot(path), bundled=str(path)))
     return out
@@ -774,7 +774,9 @@ def compatible_with_current(extension: Extension) -> bool:
     def parts(value):
         match = re.match(r"^\s*(\d+(?:\.\d+)*)", value)
         return tuple(map(int, match.group(1).split("."))) if match else None
-    required, current = parts(extension.minimum_version), parts(__version__)
+    # Extensions are IngeTrazo's: measured against the engine's version.
+    required, current = (parts(extension.minimum_version),
+                         parts(ENGINE_VERSION))
     if required is None or current is None:
         return False
     width = max(len(required), len(current))
@@ -785,7 +787,7 @@ def compatible_with_current(extension: Extension) -> bool:
 def tested_version_is_old(extension: Extension) -> bool:
     """True when tested metadata trails this app by two minor releases."""
     tested = re.match(r"^\s*(\d+)\.(\d+)", extension.minimum_version)
-    current = re.match(r"^\s*(\d+)\.(\d+)", __version__)
+    current = re.match(r"^\s*(\d+)\.(\d+)", ENGINE_VERSION)
     if not tested or not current:
         return False
     tested_major, tested_minor = map(int, tested.groups())

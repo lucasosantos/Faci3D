@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (C) 2026 Marco Sumari Tellez and IngeTrazo contributors.
 #
-# Build the IngeTrazo Linux artifacts: a single-file AppImage and a plain
+# Build the Faci3D Linux artifacts: a single-file AppImage and a plain
 # tarball of the same PyInstaller bundle.
 #
 #     packaging/build-appimage.sh [outdir]
@@ -26,10 +26,10 @@ ARCH=${ARCH:-x86_64}
 
 cd "$ROOT"
 VERSION=$("$PYTHON" -c 'from core.version import __version__; print(__version__)')
-APPDIR="$WORK/IngeTrazo.AppDir"
-APPIMAGE="$OUT/IngeTrazo-$VERSION-$ARCH.AppImage"
+APPDIR="$WORK/Faci3D.AppDir"
+APPIMAGE="$OUT/Faci3D-$VERSION-$ARCH.AppImage"
 
-echo "==> IngeTrazo $VERSION -> $APPIMAGE"
+echo "==> Faci3D $VERSION -> $APPIMAGE"
 
 echo "==> PyInstaller"
 "$PYTHON" -m PyInstaller --version >/dev/null 2>&1 \
@@ -48,15 +48,15 @@ echo "==> tarball"
 # The same bundle, without the AppImage wrapper: extract and run. For users
 # whose distro lacks FUSE (the classic AppImage complaint) or who want to
 # unpack under /opt. Ships the desktop file and icon for manual integration.
-TARDIR="$WORK/IngeTrazo-$VERSION"
-TARBALL="$OUT/IngeTrazo-$VERSION-linux-$ARCH.tar.gz"
+TARDIR="$WORK/Faci3D-$VERSION"
+TARBALL="$OUT/Faci3D-$VERSION-linux-$ARCH.tar.gz"
 rm -rf "$TARDIR"
 mkdir -p "$TARDIR" "$OUT"
 cp -a "$WORK/pyi/ingetrazo/." "$TARDIR/"
 cp packaging/ingetrazo.desktop resources/icons/ingetrazo_256.png "$TARDIR/"
 cat > "$TARDIR/README.txt" <<'TXT'
-IngeTrazo — portable Linux build
-================================
+Faci3D — portable Linux build
+=============================
 
 Run it:            ./ingetrazo          (or: ./ingetrazo model.igz)
 Self-diagnosis:    ./ingetrazo --check
@@ -67,7 +67,7 @@ it to ~/.local/share/applications/.
 
 Prefer the AppImage from the same release if your distro has FUSE.
 TXT
-tar -C "$WORK" -czf "$TARBALL" "IngeTrazo-$VERSION"
+tar -C "$WORK" -czf "$TARBALL" "Faci3D-$VERSION"
 printf '%s  (%s)\n' "$TARBALL" "$(du -h "$TARBALL" | cut -f1)"
 
 echo "==> AppDir"

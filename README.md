@@ -8,7 +8,7 @@
 desenhar uma peça e mandar para a impressora.**
 
 ![Licença: GPL-3.0-or-later](https://img.shields.io/badge/licen%C3%A7a-GPL--3.0--or--later-blue)
-![Status: em desenvolvimento](https://img.shields.io/badge/status-em%20desenvolvimento-orange)
+![Versão 0.1.0](https://img.shields.io/badge/vers%C3%A3o-0.1.0-orange)
 ![Plataforma: Linux · Windows · macOS](https://img.shields.io/badge/plataforma-Linux%20%7C%20Windows%20%7C%20macOS-informational)
 
 O Faci3D usa o jeito de modelar mais fácil que existe: desenhar uma forma no
@@ -23,8 +23,8 @@ imprimir.
 
 ## Status
 
-**Em desenvolvimento, sem versão publicada ainda.** O motor de modelagem vem
-do IngeTrazo 0.5.8, que já é usado em trabalho real e tem cerca de 4.500
+**Versão 0.1.0 — em desenvolvimento, ainda sem pacote para instalar.** O
+motor de modelagem vem do IngeTrazo 0.5.8, que já é usado em trabalho real e tem cerca de 4.500
 testes automatizados. O que é próprio do Faci3D (modo impressão 3D, mesa de
 impressão, importação de SVG, identidade) é recente: por enquanto, execute a
 partir do código-fonte (veja [Como executar](#como-executar)).

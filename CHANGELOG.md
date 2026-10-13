@@ -1,8 +1,52 @@
 # Changelog
 
+Mudanças do **Faci3D** primeiro; mais abaixo, o histórico do IngeTrazo, o
+projeto em que ele se baseia. Formato inspirado em
+[Keep a Changelog](https://keepachangelog.com); as versões seguem
+[SemVer](https://semver.org).
+
+## Faci3D [0.1.0] — 2026-10-13
+
+Primeira versão do Faci3D, um fork do IngeTrazo 0.5.8 voltado para
+impressão 3D. O motor de modelagem é o do IngeTrazo 0.5.8.
+
+### Adicionado
+- **Modo impressão 3D**: barras com as ferramentas do dia a dia; os recursos
+  de arquitetura (georreferência, BIM, pranchas, cortes, caminhada, sombras)
+  ficam escondidos. `full_interface=1` na seção `[ui]` das configurações
+  traz a interface completa de volta.
+- **Milímetros** por padrão nos documentos novos, com precisão de 0,1 mm.
+- **Mesa de impressão opcional** (menu Impressão 3D): impressoras comuns ou
+  medidas próprias, placa com grade de 10 mm e volume de impressão no
+  viewport; **Colocar na mesa** (Ctrl+Shift+B) e **Centralizar na mesa**,
+  com aviso quando a peça não cabe.
+- **Importar SVG**: contornos fechados viram faces planas no chão, prontas
+  para Empurrar / Puxar; contornos internos viram furos; tamanho real e
+  ajustável.
+- Um **vaso de planta de 150 mm** como figura de escala inicial.
+- Identidade **Faci3D**: nome, ícone e janela Sobre (com os créditos do
+  IngeTrazo).
+
+### Alterado
+- **Só cores sólidas**: o painel Materiais traz a paleta RAL e cores
+  próprias; a biblioteca de texturas e a ferramenta Posicionar textura
+  saíram. Modelos importados com textura chegam com a cor média de cada
+  imagem.
+- As configurações ficam separadas das do IngeTrazo
+  (`~/.config/Faci3D/Faci3D.conf` no Linux).
+- **Pacotes com o nome Faci3D** (GitHub Actions, numa tag `vX.Y.Z`):
+  AppImage e tarball para Linux, instalador e zip portátil para Windows,
+  `.dmg` para macOS (Apple Silicon e Intel). O instalador do Windows e o
+  `.app` do macOS têm identidade própria, então convivem com um IngeTrazo
+  instalado. Os pacotes saem sem assinatura digital.
+- Snap e Flatpak desligados até terem identidade própria (as receitas
+  continuam em `packaging/`).
+
+---
+
+# IngeTrazo
+
 All notable changes to IngeTrazo are documented here.
-Format inspired by [Keep a Changelog](https://keepachangelog.com); versions
-follow [SemVer](https://semver.org).
 
 ## [Sin publicar]
 

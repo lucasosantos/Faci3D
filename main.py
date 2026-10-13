@@ -198,11 +198,11 @@ def _self_check() -> int:
     import shutil
 
     from core.paths import app_root, is_frozen
-    from core.version import __version__
+    from core.version import ENGINE_VERSION, __version__
 
     root = app_root()
     from core.version import APP_NAME
-    print(f"{APP_NAME} {__version__}")
+    print(f"{APP_NAME} {__version__} (IngeTrazo {ENGINE_VERSION})")
     print(f"  packaged   : {'yes' if is_frozen() else 'no (running from the repo)'}")
     print(f"  app root   : {root}")
 

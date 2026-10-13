@@ -32,7 +32,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from core.i18n import current_language, tr
+from core.i18n import current_language, tr, tr_upstream
 from core.extension_manager import (
     Extension,
     ExtensionManagerError,
@@ -731,10 +731,13 @@ class ExtensionManagerDialog(QDialog):
         details.setSpacing(5)
         version_row = QHBoxLayout()
         version_row.addStretch(1)
+        # The numbers are IngeTrazo's (the engine extensions are written
+        # for), so the name beside them stays IngeTrazo.
         versions = QLabel(
-            tr("Ships with IngeTrazo {version}", version=extension.version)
+            tr_upstream("Ships with IngeTrazo {version}",
+                        version=extension.version)
             if extension.bundled else
-            tr("v{version} · Tested with IngeTrazo {tested}",
+            tr_upstream("v{version} · Tested with IngeTrazo {tested}",
                version=extension.version, tested=extension.minimum_version))
         versions.setObjectName("extVersions")
         version_row.addWidget(versions, 0, Qt.AlignTop)
@@ -771,8 +774,9 @@ class ExtensionManagerDialog(QDialog):
             restart.setWordWrap(True)
             details.addWidget(restart)
         if not compatible:
-            warning = QLabel(tr("Requires IngeTrazo {version} or later.",
-                                version=extension.minimum_version))
+            warning = QLabel(tr_upstream(
+                "Requires IngeTrazo {version} or later.",
+                version=extension.minimum_version))
             warning.setWordWrap(True)
             details.addWidget(warning)
         elif tested_version_is_old(extension):

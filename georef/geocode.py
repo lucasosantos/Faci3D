@@ -31,9 +31,9 @@ from PySide6.QtNetwork import (
 
 NOMINATIM = "https://nominatim.openstreetmap.org/search"
 IPAPI = "https://ipapi.co/json/"
-from core.version import __version__
+from core.version import ENGINE_VERSION
 
-_USER_AGENT = (f"IngeTrazo/{__version__} (https://github.com/ingelibre/ingetrazo)").encode()
+_USER_AGENT = (f"IngeTrazo/{ENGINE_VERSION} (https://github.com/ingelibre/ingetrazo)").encode()
 
 
 @dataclass(frozen=True)

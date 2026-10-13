@@ -1,6 +1,12 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-# Build the Linux AppImage + tarball on a tag and attach them to the release.
-# (The Windows installer is build-windows.yml; both fire on the same tag.)
+# Build the Faci3D Linux AppImage + tarball on a tag and attach them to the
+# release. (Windows is build-windows.yml, macOS release-macos.yml; all three
+# fire on the same tag.)
+#
+# IngeTrazo also built a Snap here and a Flatpak in release-flatpak.yml. Both
+# are off in Faci3D until they get their own identity (the snap name
+# "ingetrazo" and the Flatpak id com.ingetrazo.IngeTrazo belong upstream);
+# the recipes are still in packaging/.
 #
 # Runs on ubuntu-22.04 on purpose: an AppImage links against the glibc of the
 # machine that built it, so building on the newest runner would produce a file
@@ -40,11 +46,8 @@ jobs:
           python -m venv venv
           ./venv/bin/python -m pip install --quiet --upgrade pip
           ./venv/bin/python -m pip install --quiet PySide6==6.11.2 numpy pytest pyinstaller 'ezdxf>=1.4.4' 'manifold3d>=3.5.3'
-          # openskp: UPSTREAM main — every IngeTrazo patch is merged there
-          # (legacy corpus 186/186 PRs #194/#199, annotations write+read
-          # PR #203). Pinned by SHA like build-windows.yml so both
-          # installers ship the same reader/writer; advance the SHA when
-          # upstream lands something we need.
+          # openskp pinned by SHA (same as requirements.txt and
+          # build-windows.yml) so every installer ships the same reader.
           ./venv/bin/python -m pip install --quiet "openskp @ git+https://github.com/iamahsanmehmood/openskp@291700bc213655a00461838de71e5f206311e619#subdirectory=packages/python"
           ./venv/bin/python -c "import openskp, openskp.legacy; print('openskp OK')"
 
@@ -61,7 +64,7 @@ jobs:
       # AppImage. This is the harder question: does it start a real GUI?
       - name: Smoke test with a display
         run: |
-          APP=$(ls dist/IngeTrazo-*-x86_64.AppImage)
+          APP=$(ls dist/Faci3D-*-x86_64.AppImage)
           # No --exit-after flag, so give it a few seconds and require that it
           # was still alive: a crash on startup exits well before the timeout.
           set +e
@@ -79,20 +82,20 @@ jobs:
       # runs after extraction, not just that it was packed.
       - name: Smoke test the tarball
         run: |
-          mkdir -p tarcheck && tar -C tarcheck -xzf dist/IngeTrazo-*-linux-x86_64.tar.gz
-          tarcheck/IngeTrazo-*/ingetrazo --check
+          mkdir -p tarcheck && tar -C tarcheck -xzf dist/Faci3D-*-linux-x86_64.tar.gz
+          tarcheck/Faci3D-*/ingetrazo --check
 
       - uses: actions/upload-artifact@v4
         with:
-          name: IngeTrazo-AppImage-x86_64
-          path: dist/IngeTrazo-*-x86_64.AppImage
+          name: Faci3D-AppImage-x86_64
+          path: dist/Faci3D-*-x86_64.AppImage
           if-no-files-found: error
           retention-days: 7
 
       - uses: actions/upload-artifact@v4
         with:
-          name: IngeTrazo-tarball-x86_64
-          path: dist/IngeTrazo-*-linux-x86_64.tar.gz
+          name: Faci3D-tarball-x86_64
+          path: dist/Faci3D-*-linux-x86_64.tar.gz
           if-no-files-found: error
           retention-days: 7
 
@@ -102,103 +105,9 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           # The release usually exists already (created by hand with notes, or
-          # by build-windows.yml); create a bare one only if we got here first.
+          # by a sibling workflow); create a bare one only if we got here first.
           gh release view "${GITHUB_REF_NAME}" >/dev/null 2>&1 \
-            || gh release create "${GITHUB_REF_NAME}" --title "IngeTrazo ${GITHUB_REF_NAME}" --generate-notes
+            || gh release create "${GITHUB_REF_NAME}" --title "Faci3D ${GITHUB_REF_NAME}" --generate-notes
           gh release upload "${GITHUB_REF_NAME}" \
-            dist/IngeTrazo-*-x86_64.AppImage \
-            dist/IngeTrazo-*-linux-x86_64.tar.gz --clobber
-          # The example documents, under a name without the version so the
-          # website can point at .../releases/latest/download/ for good.
-          (cd examples && zip -q -r ../IngeTrazo-ejemplos.zip .)
-          gh release upload "${GITHUB_REF_NAME}" IngeTrazo-ejemplos.zip --clobber
-  snap:
-    name: Snap (x86_64)
-    runs-on: ubuntu-22.04
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-
-      # Same GL/xcb set the AppImage job installs: PyInstaller only bundles
-      # the Qt xcb chain it can RESOLVE at build time, and --check needs
-      # libEGL on the runner (first snap flight failed on exactly this).
-      - name: System packages
-        run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y --no-install-recommends \
-            file libegl1 libgl1 libxkbcommon-x11-0 \
-            libxcb-cursor0 libxcb-icccm4 libxcb-keysyms1 libxcb-shape0 \
-            libxcb-render-util0
-
-      - name: Python dependencies
-        run: |
-          python -m venv venv
-          ./venv/bin/python -m pip install --quiet --upgrade pip
-          ./venv/bin/python -m pip install --quiet PySide6==6.11.2 numpy pyinstaller 'ezdxf>=1.4.4' 'manifold3d>=3.5.3'
-          ./venv/bin/python -m pip install --quiet "openskp @ git+https://github.com/iamahsanmehmood/openskp@291700bc213655a00461838de71e5f206311e619#subdirectory=packages/python"
-
-      - name: Build the PyInstaller bundle
-        run: |
-          ./venv/bin/python -m PyInstaller --noconfirm ingetrazo.spec
-          dist/ingetrazo/ingetrazo --check
-
-      - name: Stage the snap tree
-        run: |
-          VERSION=$(./venv/bin/python -c 'from core.version import __version__; print(__version__)')
-          mkdir -p build/snap-stage/snap/gui build/snap-stage/payload
-          sed "s/@VERSION@/$VERSION/" packaging/snap/snapcraft.yaml.in \
-            > build/snap-stage/snap/snapcraft.yaml
-          cp -a dist/ingetrazo/. build/snap-stage/payload/
-          cp resources/icons/ingetrazo_256.png build/snap-stage/snap/gui/ingetrazo.png
-          # Desktop entry: same as the tarball's, with the snap's icon path.
-          sed -e 's|^Icon=.*|Icon=${SNAP}/meta/gui/ingetrazo.png|' \
-              packaging/ingetrazo.desktop > build/snap-stage/snap/gui/ingetrazo.desktop
-
-      - name: Build the snap
-        id: snapbuild
-        uses: snapcore/action-build@v1
-        with:
-          path: build/snap-stage
-
-      # --check proves the confined bundle still finds its own data (the
-      # same gate the AppImage passes); a GUI smoke needs a session bus the
-      # runner lacks under confinement, so data integrity is the gate here.
-      - name: Smoke test the snap
-        run: |
-          sudo snap install --dangerous "${{ steps.snapbuild.outputs.snap }}"
-          snap run ingetrazo --check
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: IngeTrazo-snap-x86_64
-          path: ${{ steps.snapbuild.outputs.snap }}
-          if-no-files-found: error
-          retention-days: 7
-
-      - name: Attach to the release
-        if: startsWith(github.ref, 'refs/tags/v')
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          gh release view "${GITHUB_REF_NAME}" >/dev/null 2>&1 \
-            || gh release create "${GITHUB_REF_NAME}" --title "IngeTrazo ${GITHUB_REF_NAME}" --generate-notes
-          gh release upload "${GITHUB_REF_NAME}" "${{ steps.snapbuild.outputs.snap }}" --clobber
-
-      # Publishes to the Snap Store ONLY when the repository carries the
-      # credential (snapcraft export-login → secret SNAPCRAFT_STORE_CREDENTIALS
-      # — and the name must be registered once: `snapcraft register ingetrazo`).
-      # Without it the job still succeeds with the .snap as a release asset.
-      - name: Publish to the Snap Store (if credentials exist)
-        if: startsWith(github.ref, 'refs/tags/v')
-        env:
-          SNAPCRAFT_STORE_CREDENTIALS: ${{ secrets.SNAPCRAFT_STORE_CREDENTIALS }}
-        run: |
-          if [ -z "$SNAPCRAFT_STORE_CREDENTIALS" ]; then
-            echo "Sin SNAPCRAFT_STORE_CREDENTIALS — se omite la publicación."
-            exit 0
-          fi
-          sudo snap install snapcraft --classic
-          snapcraft upload "${{ steps.snapbuild.outputs.snap }}" --release=stable
+            dist/Faci3D-*-x86_64.AppImage \
+            dist/Faci3D-*-linux-x86_64.tar.gz --clobber
