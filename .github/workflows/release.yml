@@ -45,7 +45,7 @@ jobs:
         run: |
           python -m venv venv
           ./venv/bin/python -m pip install --quiet --upgrade pip
-          ./venv/bin/python -m pip install --quiet PySide6==6.11.2 numpy pytest pyinstaller 'ezdxf>=1.4.4' 'manifold3d>=3.5.3'
+          ./venv/bin/python -m pip install --quiet PySide6==6.11.2 numpy pytest pyinstaller 'manifold3d>=3.5.3'
           # openskp pinned by SHA (same as requirements.txt and
           # build-windows.yml) so every installer ships the same reader.
           ./venv/bin/python -m pip install --quiet "openskp @ git+https://github.com/iamahsanmehmood/openskp@291700bc213655a00461838de71e5f206311e619#subdirectory=packages/python"

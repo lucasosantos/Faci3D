@@ -13,9 +13,8 @@ from pathlib import Path
 from typing import Optional
 
 from PySide6.QtCore import Qt, QSettings, QEvent, QCoreApplication, QTimer
-from PySide6.QtGui import QAction, QActionGroup, QKeySequence, QVector3D
+from PySide6.QtGui import QAction, QActionGroup, QKeySequence
 from PySide6.QtWidgets import (
-    QApplication,
     QFileDialog,
     QLabel,
     QMainWindow,
@@ -29,7 +28,7 @@ from PySide6.QtWidgets import (
 
 from core import general_settings as _gs
 from core.i18n import (LANGUAGE_NAMES, available_languages, current_language,
-                       set_language, tr)
+                       set_language, tr, tr_upstream)
 from views.theme import style as theme_style
 from core.units import fmt_pair
 from views.filedialogs import file_dialogs
@@ -48,14 +47,12 @@ from core.mesh import Edge, Face
 from formats import igz as igz_format
 from formats import dae as dae_format
 from formats import obj as obj_format
-from formats import ifc as ifc_format
 from formats import stl as stl_format
 from formats import gltf as gltf_format
 from tools.arc import CenterArcTool, ArcTool, ThreePointArcTool
 from tools.circle import CircleTool, PolygonTool
 from tools.dimension import DimensionTool
 from tools.eraser import EraserTool
-from tools.geopath import GeoPathTool
 from tools.line import LineTool
 from tools.protractor import ProtractorTool
 from tools.tape import TapeMeasureTool
@@ -67,23 +64,27 @@ from tools.fillet import FilletTool
 from tools.followme import FollowMeTool
 from tools.rotated_rectangle import RotatedRectangleTool
 from tools.offset import OffsetTool
-from tools.walkthrough import (FirstPersonTool, LookAroundTool,
-                               PositionCameraTool, WalkTool)
 from tools.paint import PaintTool
 from tools.paste import PasteTool
 from tools.arc import PieTool
 from tools.flip import FlipTool
 from tools.freehand import FreehandTool
-from tools.section import SectionPlaneTool
 from tools.pushpull import PushPullTool
 from tools.rectangle import RectangleTool
 from tools.select import SelectTool
-from views.tray import BimTray, GeorefTray, Tray
+from views.tray import Tray
 from views.icons import tool_icon
 from views.viewport import Viewport
 
 
-IGZ_FILE_FILTER = "IngeTrazo document (*.igz);;All files (*)"
+#: Open and Save speak only .faci3d; IngeTrazo's .igz comes in through
+#: File ▸ Import (the filter is shown with ``tr_upstream`` so it keeps
+#: saying IngeTrazo).
+PROJECT_FILE_FILTER = "Faci3D project (*.faci3d)"
+LEGACY_FILE_FILTER = "IngeTrazo document (*.igz)"
+#: Inserting a whole file as a component takes either (``tr_upstream``
+#: too: it names IngeTrazo).
+ANY_PROJECT_FILTER = "Faci3D project or IngeTrazo document (*.faci3d *.igz)"
 
 # What each command does, for the status bar, the button tooltips and F3
 # (Blender's descriptions): a sentence, in English — ``tr`` translates it
@@ -100,8 +101,6 @@ _VIEW_TIPS = {
 }
 _STYLE_TIPS = {
     "Default": "Faces in their colours, under the sky.",
-    "Architectural": "Faces with their materials on a plain white "
-                     "background, without the sky.",
     "Shaded": "Faces in their colours, on a plain background.",
     "Hidden line": "White faces that hide what lies behind them — a clean "
                    "line drawing.",
@@ -110,7 +109,7 @@ _STYLE_TIPS = {
     "Wireframe": "Only the edges: the faces are not drawn.",
     "X-ray": "See-through faces, so the edges behind them show.",
 }
-_SAVE_TIP = ("Save the document — the model and every sheet — to its .igz "
+_SAVE_TIP = ("Save the project — the model and every sheet — to its .faci3d "
              "file.")
 _TEXT3D_TIP = ("Build a text as an extruded solid, in the font and height "
                "you choose.")
@@ -236,8 +235,9 @@ class _DockDropZone(QWidget):
 class MainWindow(QMainWindow):
     """Top-level IngeTrazo window."""
 
-    #: Faci3D's 3D-printing interface (views/print_mode.py). main.py turns
-    #: it on; tests build the full interface unless they ask for it.
+    #: Faci3D's 3D-printing interface (views/print_mode.py): trimmed
+    #: toolbars, the 3D Print menu, millimetres. main.py turns it on; tests
+    #: build the untrimmed window unless they ask for it.
     print_mode = False
 
     def __init__(self, defer_extensions: bool = False) -> None:
@@ -273,18 +273,6 @@ class MainWindow(QMainWindow):
             "tape": TapeMeasureTool(),
             "protractor": ProtractorTool(),
             "text": TextTool(),
-            # Georef trace (Track G) — draws a GeoPath, never mesh geometry.
-            "geopath": GeoPathTool(),
-            # Tools ▸ Section Plane (core/section.py).
-            "section": SectionPlaneTool(),
-            # Camera ▸ Position Camera / Walk / Look Around
-            # (tools/walkthrough.py) — Rafael's «pasitos» for interiors.
-            "position_camera": PositionCameraTool(),
-            "walk": WalkTool(),
-            "look_around": LookAroundTool(),
-            # Walking as a game plays it (W/A/S/D + mouse look), beside
-            # the classic Walk rather than instead of it.
-            "first_person": FirstPersonTool(),
         }
         # The Solid Tools (tools/solid_tools.py, core/solids.py).
         from tools.solid_tools import SOLID_TOOLS
@@ -363,7 +351,6 @@ class MainWindow(QMainWindow):
         if state:
             self.restoreState(state)
         self._show_default_trays(st)
-        self._place_new_toolbars(st)
         # Packed on the first show (see showEvent): the toolbars have no
         # geometry to read their order from until the window is laid out.
         self._toolbars_packed = False
@@ -395,22 +382,8 @@ class MainWindow(QMainWindow):
 
     # ---- 3D mouse (issue #108) ----------------------------------------------
     def _route_window_toggle(self, name: str, own):
-        """A slot for a Window-menu toggle (clean screen, sidebar) that acts
-        on the window being worked in. On macOS the menu bar is global: its
-        Cmd+0 answered for the MODEL window even with the sheet composer in
-        front — «al pulsarlo me lleva a la ventana del Modelador y le oculta
-        todo» (#114). When the composer is the active window, the press goes
-        to its own action and this one keeps its state."""
+        """A slot for a Window-menu toggle (clean screen, sidebar)."""
         def slot(on: bool) -> None:
-            from PySide6.QtWidgets import QApplication
-            comp = getattr(self, "_composer", None)
-            if comp is not None and QApplication.activeWindow() is comp:
-                mine = getattr(self, name)
-                mine.blockSignals(True)
-                mine.setChecked(not on)
-                mine.blockSignals(False)
-                getattr(comp, name).toggle()
-                return
             own(on)
         return slot
 
@@ -478,25 +451,6 @@ class MainWindow(QMainWindow):
                     self.addToolBarBreak(area)
                 self.addToolBar(area, tb)
                 tb.setVisible(shown)
-
-    def _place_new_toolbars(self, st) -> None:
-        """A toolbar born after a profile saved its layout is unknown to
-        that saved state, so Qt leaves it wherever it was created (the
-        top). Put it where the factory layout has it, ONCE, and remember
-        that: Marco's own arrangement keeps it from then on.
-
-        Walkthrough (2026-09-19) goes at the left, under Annotate — below
-        the 3D Text button, where Marco asked for it."""
-        from PySide6.QtCore import Qt
-        key = "ui/placed/walkthrough"
-        tb = self.toolbars.get("walkthrough")
-        if tb is None or st.value(key) is not None:
-            return
-        if self.toolBarArea(tb) != Qt.LeftToolBarArea:
-            self.removeToolBar(tb)
-            self.addToolBar(Qt.LeftToolBarArea, tb)
-            tb.show()
-        st.setValue(key, 1)
 
     # ---- Auto-save (Preferences ▸ General) ----------------------------------
     def _setup_autosave(self) -> None:
@@ -579,15 +533,12 @@ class MainWindow(QMainWindow):
         self._saved_version = -1        # recovered ≠ saved: title shows *
         self.viewport.notify_scene_changed()
         self._sync_style_menu()
-        self._sync_section_menu()
         self._update_title()
 
     def _build_tray(self) -> None:
         # Two role-based right-side docks (tabbed): Properties (what you're
         # working with) and Georef (the location workspace).
         self.tray = Tray(self)
-        self.bim_tray = BimTray(self)
-        self.georef_tray = GeorefTray(self)
         from views.outliner import ProjectBrowser
         self.project_browser = ProjectBrowser(self)
         self._lay_out_trays()
@@ -595,8 +546,7 @@ class MainWindow(QMainWindow):
         # so each dock's own title bar would say the same thing right above
         # it. An empty title-bar widget removes the duplicate (a clean tray
         # look); panels are toggled from the View menu, not dragged around.
-        for dock in (self.tray, self.bim_tray, self.georef_tray,
-                     self.project_browser):
+        for dock in (self.tray, self.project_browser):
             dock.setTitleBarWidget(QWidget(dock))
         self.tray.raise_()
         self._build_sidebar_handle()
@@ -604,34 +554,22 @@ class MainWindow(QMainWindow):
         self.viewport.sceneVersionChanged.connect(
             lambda _v: self.tray.on_scene_changed())
         self.viewport.sceneVersionChanged.connect(
-            lambda _v: self.bim_tray.on_scene_changed())
-        self.viewport.sceneVersionChanged.connect(
-            lambda _v: self.georef_tray.on_scene_changed())
-        self.viewport.sceneVersionChanged.connect(
             lambda _v: self.project_browser.on_scene_changed())
 
-        # Styles, Shadows and Dimension style hang OFF THE TOOLBAR as
-        # dropdown panels (user: the lateral bar was drowning, and floating
+        # Styles hangs OFF THE TOOLBAR as a
+        # dropdown panel (user: the lateral bar was drowning, and floating
         # windows felt loose — "¿no hay forma de integrarlo en el
         # toolbar?"). Click the button, the panel drops under it; click
         # outside, it folds away.
         from PySide6.QtWidgets import QToolButton, QWidgetAction
-        from views.tray import DimensionStylePanel, ShadowsPanel, StylesPanel
+        from views.tray import StylesPanel
         self.styles_panel = StylesPanel(self)
-        self.shadows_panel = ShadowsPanel(self)
-        self.dimstyle_panel = DimensionStylePanel(self)
         panels_tb = self._new_toolbar(tr("Panels"), "panels_toolbar")
         self._panel_actions: dict[str, QAction] = {}
         for panel, key, title, tip in (
                 (self.styles_panel, "styles", tr("Styles"),
                  tr("How the model looks: faces, edges, background and "
-                    "sky.")),
-                (self.shadows_panel, "shadows", tr("Shadows"),
-                 tr("The sun's shadows: on or off, the date, the time and "
-                    "how dark they are.")),
-                (self.dimstyle_panel, "dimension_style", tr("Dimension style"),
-                 tr("How dimensions look: text, arrows, units and "
-                    "precision."))):
+                    "sky.")),):
             btn = QToolButton(panels_tb)
             btn.setIcon(tool_icon(key))
             btn.setToolTip(f"{title}\n{tip}")
@@ -645,17 +583,6 @@ class MainWindow(QMainWindow):
             btn.setMenu(menu)
             self._panel_actions[key] = panels_tb.addWidget(btn)
             self._icon_actions.append((btn, key))
-
-        # Terrain profile dock (Track G, G4) — hidden until requested.
-        from views.profile_panel import ProfileDock
-        self.profile_dock = ProfileDock(self)
-        self.addDockWidget(Qt.BottomDockWidgetArea, self.profile_dock)
-        self.profile_dock.hide()
-        self.viewport.sceneVersionChanged.connect(
-            lambda _v: self.profile_dock.on_scene_changed())
-        self.viewport.sceneVersionChanged.connect(
-            lambda _v: self._on_surfaces_scene_changed())
-        self.viewport.tilesChanged.connect(self._build_terrain)
 
     def _new_toolbar(self, title: str, object_name: str) -> QToolBar:
         """A separate, independently draggable/floatable icons-only toolbar
@@ -677,18 +604,14 @@ class MainWindow(QMainWindow):
         return tb
 
     def set_toolbar_icon_size(self, px: int) -> None:
-        """Icon size for every toolbar — this window's and the composer's
-        (open now or later: it reads the setting when it builds). From
-        Preferences ▸ General; persisted."""
+        """Icon size for every toolbar. From Preferences ▸ General;
+        persisted."""
         from PySide6.QtCore import QSize
         from views.icons import save_toolbar_icon_px
         px = int(px)
         save_toolbar_icon_px(px)
         for tb in self.findChildren(QToolBar):
             tb.setIconSize(QSize(px, px))
-        comp = getattr(self, "_composer", None)
-        if comp is not None and hasattr(comp, "set_toolbar_icon_size"):
-            comp.set_toolbar_icon_size(px)
 
     def _add_tool_button(self, tb: QToolBar, key: str) -> QAction:
         tool = self._tools[key]
@@ -729,15 +652,12 @@ class MainWindow(QMainWindow):
               "polygon", "arc", "arc3", "center_arc", "pie"]),
             # Push/Pull first (Marco, 2026-09-14), then move, rotate, scale, flip…
             ("modify", tr("Modify"), ["pushpull", "move", "rotate", "scale", "flip", "followme", "offset", "fillet"]),
-            ("annotate", tr("Annotate"), ["tape", "protractor", "dimension", "text", "geopath"]),
-            ("sections", tr("Sections"), ["section"]),
+            ("annotate", tr("Annotate"), ["tape", "protractor", "dimension", "text"]),
             # The Solid Tools toolbar, in the usual order.
             ("solids", tr("Solid Tools"),
              ["outer_shell", "solid_union", "solid_subtract", "solid_trim",
               "solid_intersect", "solid_split"]),
             # The Walkthrough toolbar, in the usual order.
-            ("walkthrough", tr("Walkthrough"),
-             ["position_camera", "walk", "look_around", "first_person"]),
         ]
         for oname, title, keys in layout:
             tb = self._new_toolbar(title, oname)
@@ -773,38 +693,6 @@ class MainWindow(QMainWindow):
         self._act_eyedropper.toggled.connect(self._on_toggle_eyedropper)
         main_tb.addAction(self._act_eyedropper)
         self._icon_actions.append((self._act_eyedropper, "eyedropper"))
-
-        # The Sections toolbar carries the three usual display toggles next
-        # to the tool: Display Section Planes / Cuts / Fill. Created here
-        # (the menubar builds later and reuses the same actions).
-        sec_tb = self.toolbars["sections"]
-        sec_tb.addSeparator()
-
-        def _sec_toggle(key: str, text: str, tip: str, slot):
-            act = QAction(tool_icon(key), text, self)
-            act.setCheckable(True)
-            act.setChecked(True)
-            act.setToolTip(text)
-            act.setStatusTip(tip)
-            act.toggled.connect(slot)
-            self._icon_actions.append((act, key))
-            sec_tb.addAction(act)
-            return act
-
-        self._act_show_splanes = _sec_toggle(
-            "section_planes", tr("Section Planes"),
-            tr("Show the section planes themselves; the cut they make "
-               "stays either way."),
-            lambda on: self._set_section_visibility("show_section_planes", on))
-        self._act_show_scuts = _sec_toggle(
-            "section_cuts", tr("Section Cuts"),
-            tr("Cut the model open at its active section planes; off, the "
-               "model shows whole."),
-            lambda on: self._set_section_visibility("show_section_cuts", on))
-        self._act_section_fill = _sec_toggle(
-            "section_fill", tr("Section Fill"),
-            tr("Fill the cut faces of a section with a solid colour."),
-            lambda on: self._set_style_field("section_fill", on))
 
         # 3D Text opens a dialog (it's a one-shot action, not a checkable tool),
         # so it gets its own button on the Annotate bar next to the 2D Text tool.
@@ -912,9 +800,6 @@ class MainWindow(QMainWindow):
              "isometrics."),
             ("perspective", "Perspective",
              "The view as the eye sees it."),
-            ("two_point", "Two-Point Perspective",
-             "Vertical lines stay vertical, the usual view for "
-             "architectural presentations."),
         ]:
             icon = "proj_" + mode
             act = QAction(tool_icon(icon), tr(label), self)
@@ -1139,13 +1024,6 @@ class MainWindow(QMainWindow):
 
         edit_menu.addAction(self._act_simplify_mesh)
 
-        convert_path_action = QAction(tr("Convert Path to Geometry"), self)
-        convert_path_action.setStatusTip(tr(
-            "Turn the selected paths into edges of the model; a closed "
-            "path becomes a face, ready to push up."))
-        convert_path_action.triggered.connect(self._on_convert_geopath)
-        edit_menu.addAction(convert_path_action)
-
         delete_guides_action = QAction(tr("Delete Guides"), self)
         delete_guides_action.setStatusTip(tr(
             "Remove every guide line and guide point from the model."))
@@ -1240,17 +1118,14 @@ class MainWindow(QMainWindow):
         action_proj.triggered.connect(self.viewport.toggle_projection)
         camera_menu.addAction(action_proj)
 
-        # The Camera menu: Parallel Projection / Perspective /
-        # Two-Point Perspective (verticals stay vertical, as an
-        # architectural drawing wants them — José Castro Basso,
-        # FADU–UDELAR). The SAME actions as the quick buttons on the
-        # Standard Views bar, so a shortcut given to one is the other's.
-        for mode in ("parallel", "perspective", "two_point"):
+        # The Camera menu: Parallel Projection / Perspective. The SAME
+        # actions as the quick buttons on the Standard Views bar, so a
+        # shortcut given to one is the other's.
+        for mode in ("parallel", "perspective"):
             camera_menu.addAction(self._projection_actions[mode])
 
         # Styles: the model's display look — face mode, edges,
-        # background. Scenes remember the style; the composer's live-look
-        # frames inherit it.
+        # background.
         from core.style import BUILTIN_STYLES
         camera_menu.addSeparator()
         style_menu = camera_menu.addMenu(tr("Style"))
@@ -1346,21 +1221,6 @@ class MainWindow(QMainWindow):
         self._sync_component_edit_menu()
         camera_menu.aboutToShow.connect(self._sync_component_edit_menu)
 
-        # Sun shadows (core/sun.py) — the checkbox mirrors the tray panel.
-        self._act_shadows = QAction(tr("Shadows"), self)
-        self._act_shadows.setStatusTip(tr(
-            "Cast the sun's shadows; the Shadows panel sets the date, the "
-            "time and how dark they are."))
-        self._act_shadows.setCheckable(True)
-        self._act_shadows.toggled.connect(self._on_toggle_shadows)
-        camera_menu.addAction(self._act_shadows)
-
-        # View ▸ Section Planes / Cuts / Fill — the same actions
-        # as the Sections toolbar buttons (created in _build_toolbar).
-        camera_menu.addSeparator()
-        camera_menu.addAction(self._act_show_splanes)
-        camera_menu.addAction(self._act_show_scuts)
-        camera_menu.addAction(self._act_section_fill)
 
         # View ▸ Hidden Objects / Hidden Geometry: what Hide put
         # away comes back as a see-through grid and can be selected again
@@ -1386,10 +1246,6 @@ class MainWindow(QMainWindow):
         camera_menu.addSeparator()
         for action in self._nav_actions.values():   # Orbit / Pan / Zoom / Zoom Window
             camera_menu.addAction(action)
-        # Camera ▸ Position Camera / Walk / Look Around.
-        camera_menu.addSeparator()
-        for key in ("position_camera", "walk", "look_around", "first_person"):
-            camera_menu.addAction(self._tool_actions[key])
 
         # Draw menu (the drawing tools, grouped by family)
         draw_menu = menubar.addMenu(tr("Draw"))
@@ -1401,8 +1257,6 @@ class MainWindow(QMainWindow):
         shapes_menu = draw_menu.addMenu(tr("Shapes"))
         for key in ("rectangle", "rotated_rect", "circle", "polygon"):
             shapes_menu.addAction(self._tool_actions[key])
-        draw_menu.addSeparator()
-        draw_menu.addAction(self._tool_actions["geopath"])
 
         # Tools menu (select/modify/measure — drawing lives in Draw)
         tools_menu = menubar.addMenu(tr("Tools"))
@@ -1410,8 +1264,7 @@ class MainWindow(QMainWindow):
                      ("move", "rotate", "scale", "flip"),
                      ("pushpull", "followme", "offset", "fillet"),
                      ("tape", "protractor"),
-                     ("dimension", "text"),
-                     ("section",)):
+                     ("dimension", "text")):
             for key in keys:
                 tools_menu.addAction(self._tool_actions[key])
             tools_menu.addSeparator()
@@ -1429,13 +1282,6 @@ class MainWindow(QMainWindow):
         action_3dtext.triggered.connect(self._on_insert_3d_text)
         tools_menu.addAction(action_3dtext)
         self._icon_actions.append((action_3dtext, "text3d"))
-        tools_menu.addSeparator()
-        action_profile = QAction(tr("Terrain profile of selection"), self)
-        action_profile.setStatusTip(tr(
-            "Draw the terrain profile along the selected path in the "
-            "profile panel."))
-        action_profile.triggered.connect(self._on_terrain_profile)
-        tools_menu.addAction(action_profile)
         tools_menu.addSeparator()
         action_cancel = QAction(tr("Cancel current tool"), self)
         action_cancel.setStatusTip(tr(
@@ -1458,12 +1304,6 @@ class MainWindow(QMainWindow):
             lambda m=panels_menu: self._fill_panels_menu(m))
         window_menu.addMenu(panels_menu)
         self._panels_menu = panels_menu
-
-        toggle_profile = self.profile_dock.toggleViewAction()
-        toggle_profile.setText(tr("Terrain profile"))
-        toggle_profile.setStatusTip(tr(
-            "Show or hide the panel with the terrain profile along a path."))
-        window_menu.addAction(toggle_profile)
 
 
         # AutoCAD's Ctrl+0 clean screen: nothing but the model, for
@@ -1521,12 +1361,6 @@ class MainWindow(QMainWindow):
         help_menu = menubar.addMenu(tr("Help"))
         help_menu.addAction(search_action)
         help_menu.addSeparator()
-        get_models_action = QAction(tr("Get more models and textures…"), self)
-        get_models_action.setStatusTip(tr(
-            "Free websites with models and textures that open in "
-            "IngeTrazo."))
-        get_models_action.triggered.connect(self._on_get_models)
-        help_menu.addAction(get_models_action)
         # Only as an AppImage: put a launcher in the menu, or take it away.
         from core.appimage import appimage_path
         if appimage_path() is not None:
@@ -1575,7 +1409,7 @@ class MainWindow(QMainWindow):
     #: Panels): the specialised workspaces. Properties, the Browser and
     #: the bundled AI and Render tabs open. An extension may
     #: ask the same for a panel of its own (``add_panel(start_hidden=True)``).
-    DEFAULT_HIDDEN_TRAYS = frozenset({"tray_bim", "tray_georef"})
+    DEFAULT_HIDDEN_TRAYS = frozenset()
 
     def _show_default_trays(self, st) -> None:
         """The trays open at start-up as the user left them in Window ▸
@@ -1660,8 +1494,7 @@ class MainWindow(QMainWindow):
     #: The factory order of the side tray's tabs, all on the right:
     #: Properties first, the model's tree next, then the workspaces.
     def _default_tray_order(self) -> list:
-        return [self.tray, self.project_browser, self.bim_tray,
-                self.georef_tray]
+        return [self.tray, self.project_browser]
 
     def _lay_out_trays(self) -> None:
         """The trays in their factory place: every one on the right, tabbed
@@ -1774,14 +1607,9 @@ class MainWindow(QMainWindow):
 
     def _sidebar_docks(self) -> list:
         docks = [d for d in (getattr(self, "tray", None),
-                             getattr(self, "bim_tray", None),
-                             getattr(self, "georef_tray", None),
                              getattr(self, "project_browser", None),
                              *getattr(self, "_extension_docks", ()))
                  if d is not None]
-        if self.print_mode:
-            from views.print_mode import hides_dock
-            docks = [d for d in docks if not hides_dock(d)]
         return docks
 
     def _build_sidebar_handle(self) -> None:
@@ -2368,9 +2196,6 @@ class MainWindow(QMainWindow):
         anchor = self._ext_anchor
         bars_before = set(self.findChildren(QToolBar))
         plugins, errors = discover_plugins()
-        if self.print_mode:
-            from views.print_mode import skip_plugin
-            plugins = [p for p in plugins if not skip_plugin(p)]
         from core.extension_manager import extension_startup_state
         self._extension_startup_state = extension_startup_state()
 
@@ -2465,7 +2290,6 @@ class MainWindow(QMainWindow):
             if state:
                 self.restoreState(state)
                 self._show_default_trays(st)
-                self._place_new_toolbars(st)
                 self._pack_toolbars()
 
     def _on_manage_extensions(self) -> None:
@@ -2606,7 +2430,7 @@ class MainWindow(QMainWindow):
 
         open_action = QAction(tr("Open…"), self)
         open_action.setStatusTip(tr(
-            "Open an IngeTrazo document (.igz) in place of this one."))
+            "Open a Faci3D project (.faci3d) in place of this one."))
         open_action.setShortcut(QKeySequence.Open)
         open_action.triggered.connect(self._on_open)
         actions.append(open_action)
@@ -2644,9 +2468,13 @@ class MainWindow(QMainWindow):
         # goes out — the flat list had import/export items scattered.
         import_menu = QMenu(tr("Import"), self)
         for label, tip, handler in (
-            (tr("IngeTrazo document as component (.igz)…"),
-             tr("Bring another IngeTrazo document in as one component, "
-                "placed with a click."),
+            (tr_upstream("IngeTrazo document (.igz)…"),
+             tr_upstream("Open an IngeTrazo document as a new project; "
+                         "Save keeps it as .faci3d."),
+             self._on_import_legacy),
+            (tr("Project as component (.faci3d, .igz)…"),
+             tr("Bring another project in as one component, placed with "
+                "a click."),
              self._on_import_igz),
             (tr("SKP (.skp)…"),
              tr("Bring in a .skp model with its groups, materials and "
@@ -2674,49 +2502,15 @@ class MainWindow(QMainWindow):
             (tr("Image (PNG / JPG)…"),
              tr("Place a picture in the model to trace over."),
              self._on_import_image),
-            (tr("Orthomosaic (GeoTIFF)…"),
-             tr("Lay a GeoTIFF orthomosaic under the model at its true "
-                "place and size, to trace over."),
-             self._on_import_orthophoto),
-            (tr("AutoCAD DWG (.dwg)…"),
-             tr("Bring in the linework of an AutoCAD drawing, one group per "
-                "layer."),
-             self._on_import_dwg),
-            (tr("AutoCAD DXF (.dxf)…"),
-             tr("Bring in the linework of an AutoCAD drawing, one group per "
-                "layer."),
-             self._on_import_dxf),
-            (tr("Georeference (KML / GeoJSON)…"),
-             tr("Bring in a KML, KMZ or GeoJSON alignment as paths in their "
-                "true place, ready to profile or measure."),
-             self._on_import_georef),
-            (tr("Survey points CSV (UTM)…"),
-             tr("Bring in surveyed points from a CSV file with UTM "
-                "coordinates."),
-             self._on_import_survey_points),
-            (tr("Photogrammetric mesh (WebODM)…"),
-             tr("Bring in a WebODM drone survey in its true place, as a "
-                "mesh to trace over."),
-             self._on_import_photomesh),
         ):
             act = QAction(label, self)
             act.setStatusTip(tip)
             act.triggered.connect(handler)
             import_menu.addAction(act)
-        import_menu.addSeparator()
-        clear_tex = QAction(tr("Clear imported texture cache…"), self)
-        clear_tex.setStatusTip(tr(
-            "Delete the images extracted from imported .skp files."))
-        clear_tex.triggered.connect(self._on_clear_texture_cache)
-        import_menu.addAction(clear_tex)
         actions.append(import_menu)
 
         export_menu = QMenu(tr("Export"), self)
         for label, tip, handler in (
-            (tr("IFC (BIM)…"),
-             tr("Save the model as IFC for BIM software, with what the BIM "
-                "panel tagged."),
-             self._on_export_ifc),
             (tr("glTF / GLB (3D, single file)…"),
              tr("Save the model as one .glb file with its materials and "
                 "textures, for Blender and web viewers."),
@@ -2731,10 +2525,6 @@ class MainWindow(QMainWindow):
             (tr("Wavefront OBJ (.obj)…"),
              tr("Save the model as Wavefront OBJ with its materials."),
              self._on_export_obj),
-            (tr("Current view as DXF…"),
-             tr("Save the view on screen as a 2D line drawing for CAD, with "
-                "the hidden lines removed."),
-             self._on_export_view_dxf),
             (tr("Image (PNG / JPG)…"),
              tr("Save the view on screen as a PNG or JPG picture at the "
                 "width you choose."),
@@ -2748,14 +2538,6 @@ class MainWindow(QMainWindow):
 
         # Components moved to the Properties tray (a panel with
         # static thumbnails) — see views/tray.py::ComponentsPanel.
-
-        actions.append(self._separator())
-
-        composer_action = QAction(tr("Sheet composer…"), self)
-        composer_action.setStatusTip(tr(
-            "Lay out the model on paper at exact scale and export a PDF plan."))
-        composer_action.triggered.connect(self._on_open_composer)
-        actions.append(composer_action)
 
         actions.append(self._separator())
 
@@ -2774,44 +2556,18 @@ class MainWindow(QMainWindow):
         return sep
 
     def _build_statusbar(self) -> None:
-        # The status bar carries the Model | Sheet 1 | … strip at its left,
-        # on the same row as the measurements box (AutoCAD's Model / Layout
-        # tabs): one click from the model to any sheet.
-        from views.sheet_tabs import SheetStatusBar
-        bar = SheetStatusBar(self, on_model=self._show_model,
-                             on_sheet=self._show_strip_sheet,
-                             on_new=self._show_new_sheet,
-                             on_menu=self._strip_sheet_menu)
+        from views.status_bar import StatusBar
+        bar = StatusBar(self)
         self.setStatusBar(bar)
-        self._sheet_tabs = bar.tabs
-        # Ctrl+Tab: to the sheets and back (#91, @pacaeiro) — the last sheet
-        # shown, as the strip's own tab; Ctrl+Shift+Tab too, with only two
-        # places to go. A document without sheets gets its first one.
-        from PySide6.QtGui import QShortcut
-        for seq in ("Ctrl+Tab", "Ctrl+Shift+Tab"):
-            QShortcut(QKeySequence(seq), self, activated=self._to_sheets)
         # ONE hint for the tool and its step (the usual status bar) goes in
-        # as the bar's BASE message — SheetStatusBar keeps the Model | Sheet
-        # strip glued to the left and restores the base after a timed
-        # message (flash_status). A widget of our own here landed LEFT of
-        # the strip (Marco, 2026-09-15: «la ubicación de modelo y
-        # composiciones siempre debe ser primero»). It replaced a strip of
-        # every shortcut at once.
+        # as the bar's BASE message — StatusBar restores it after a timed
+        # message (flash_status).
         self._tool_label = QLabel(tr("Tool: none"))
         bar.addPermanentWidget(self._tool_label)
         # Not shown any more: the tool's name leads the hint instead, and the
         # 250 px it held go to the hint (Marco, 23-09 — the icon of the
         # tool is highlighted anyway). Kept as the record other code reads.
         self._tool_label.hide()
-        self._refresh_sheet_tabs()
-
-        # Live UTM readout, the way a CAD shows coordinates. Local scene metres
-        # are meaningless to anyone outside the file; easting/northing is what
-        # goes on a plan, into a GPS, and into a report. Only shown once the
-        # scene has a datum — there is no coordinate without one.
-        self._coord_label = QLabel("")
-        theme_style(self._coord_label, "color:{muted}; padding:0 8px;")
-        bar.addPermanentWidget(self._coord_label)
 
         # What Repeat would run, on the right while Select is up — the VCB
         # box is hidden then, so the corner is free. It cannot ride on the
@@ -2850,8 +2606,6 @@ class MainWindow(QMainWindow):
         self._status_timer.timeout.connect(self._flush_status_texts)
         self.viewport.measurementChanged.connect(
             lambda text: self._queue_status_text("measurement", text))
-        self.viewport.coordinateChanged.connect(
-            lambda text: self._queue_status_text("coordinate", text))
 
     _VCB_IDLE_STYLE = (
         "color:#0F141B; background:#FFFFFF; border:1px solid #9aa3ad;"
@@ -2921,12 +2675,6 @@ class MainWindow(QMainWindow):
     def _flush_status_texts(self) -> None:
         self._update_status_hint()
         pending, self._status_pending = self._status_pending, {}
-        coord = pending.get("coordinate")
-        if coord is not None and coord != self._coord_label.text():
-            self._coord_label.setText(coord)
-            # The compact readout above; the full one, zone included, on hover.
-            self._coord_label.setToolTip(
-                getattr(self.viewport, "_last_coordinate_full", "") or "")
         meas = pending.get("measurement")
         if meas is not None and meas != getattr(self, "_vcb_live", None):
             self._on_measurement(meas)
@@ -3337,7 +3085,7 @@ class MainWindow(QMainWindow):
                  if getattr(self, "_current_path", None) else "")
         path, _ = file_dialogs.getOpenFileName(
             self, tr("Components from File"), start,
-            tr("IngeTrazo document (*.igz)"))
+            tr_upstream(ANY_PROJECT_FILTER))
         if not path:
             return
         try:
@@ -3519,60 +3267,6 @@ class MainWindow(QMainWindow):
             self.viewport.flash_status(tr("No faces could be simplified"))
         self.viewport.update()
 
-    @_repeatable("Convert Path to Geometry")
-    def _on_convert_geopath(self) -> None:
-        """Bake selected georef paths into real mesh geometry (Track G bridge).
-
-        The trace crosses from the georef subsystem into the modelling engine
-        *on demand*: each segment becomes a welded edge (a closed path auto-faces,
-        so a traced footprint is ready to push/pull into a building), and the
-        GeoPath is consumed. One undoable step.
-        """
-        from georef.geopath import GeoPath
-        from core.edits import build_add_edges
-        from core.history import CompoundCommand, DeleteGeoPathsCommand
-
-        scene = self.viewport.scene
-        paths = [p for p in scene.selection if isinstance(p, GeoPath)]
-        if not paths:
-            self.statusBar().showMessage(
-                tr("Select a path to convert to geometry."), 3000)
-            return
-        cmds = []
-        for path in paths:
-            segs = [(a, b) for a, b in path.segments()]
-            if segs:
-                cmds.append(build_add_edges(scene, segs, detect_faces=True))
-        cmds.append(DeleteGeoPathsCommand(paths))
-        cmd = cmds[0] if len(cmds) == 1 else CompoundCommand(cmds)
-        self.viewport.history.execute(cmd)
-        self.viewport.update()
-
-    # ---- Sections (section planes) -----------------------------------------
-    def _set_section_visibility(self, attr: str, on: bool) -> None:
-        setattr(self.viewport.scene, attr, bool(on))
-        self.viewport.update()
-        browser = getattr(self, "project_browser", None)
-        if browser is not None:
-            browser.outliner.on_scene_changed()
-
-    def _sync_section_menu(self) -> None:
-        scene = self.viewport.scene
-        for act, value in (
-                (self._act_show_splanes,
-                 getattr(scene, "show_section_planes", True)),
-                (self._act_show_scuts,
-                 getattr(scene, "show_section_cuts", True)),
-                (getattr(self, "_act_hidden_objects", None),
-                 getattr(scene, "show_hidden_objects", False)),
-                (getattr(self, "_act_hidden_geometry", None),
-                 getattr(scene, "show_hidden_geometry", False))):
-            if act is None:
-                continue
-            act.blockSignals(True)
-            act.setChecked(value)
-            act.blockSignals(False)
-
     def _sync_component_edit_menu(self) -> None:
         """The Component Edit checkmarks and the rest-mode radios follow
         the viewport: Preferences changes the same mode."""
@@ -3622,76 +3316,6 @@ class MainWindow(QMainWindow):
         scene.version += 1
         self.viewport.update()
 
-    def prompt_section_name(self, plane) -> None:
-        """The post-placement prompt: name + symbol (cancel keeps
-        the defaults; the placement itself is already committed). «Don't
-        ask again» keeps the defaults from then on — many users never name
-        a section (issue #62, @pacaeiro); Preferences ▸ General turns the
-        prompt back on."""
-        if str(QSettings().value("section/ask_name", "1")) == "0":
-            return
-        from PySide6.QtWidgets import (QCheckBox, QDialog, QDialogButtonBox,
-                                       QFormLayout, QLineEdit)
-        dlg = QDialog(self)
-        dlg.setWindowTitle(tr("Name Section Plane"))
-        form = QFormLayout(dlg)
-        name_edit = QLineEdit(plane.name)
-        sym_edit = QLineEdit(plane.symbol)
-        sym_edit.setMaxLength(3)
-        form.addRow(tr("Name"), name_edit)
-        form.addRow(tr("Symbol"), sym_edit)
-        no_more = QCheckBox(tr("Don't ask again — keep the default name "
-                               "and symbol (Preferences ▸ General turns "
-                               "this back on)"))
-        form.addRow("", no_more)
-        buttons = QDialogButtonBox(
-            QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
-        buttons.accepted.connect(dlg.accept)
-        buttons.rejected.connect(dlg.reject)
-        form.addRow(buttons)
-        if dlg.exec() == QDialog.Accepted:
-            plane.name = name_edit.text().strip() or plane.name
-            plane.symbol = sym_edit.text().strip() or plane.symbol
-            if no_more.isChecked():
-                QSettings().setValue("section/ask_name", "0")
-            self.viewport.update()
-
-    def _selected_section_planes(self) -> list:
-        from core.section import SectionPlane
-        return [p for p in self.viewport.scene.selection
-                if isinstance(p, SectionPlane)]
-
-    def _on_reverse_section(self) -> None:
-        from core.history import ReverseSectionPlaneCommand
-        for plane in self._selected_section_planes():
-            self.viewport.history.execute(ReverseSectionPlaneCommand(plane))
-        self.viewport.update()
-
-    def _on_toggle_active_section(self) -> None:
-        from core.history import SetActiveSectionCommand
-        planes = self._selected_section_planes()
-        if not planes:
-            return
-        plane = planes[0]
-        self.viewport.history.execute(
-            SetActiveSectionCommand(None if plane.active else plane))
-        self.viewport.update()
-
-    def _on_align_view_to_section(self) -> None:
-        """Align View: look straight at the cut face."""
-        import math as _math
-        planes = self._selected_section_planes()
-        plane = planes[0] if planes else self.viewport.scene.active_section()
-        if plane is None:
-            return
-        cam = self.viewport.camera
-        n = plane.normal
-        cam.target = QVector3D(plane.point)
-        cam.pitch = _math.asin(max(-1.0, min(1.0, n.z())))
-        if abs(n.x()) > 1e-9 or abs(n.y()) > 1e-9:
-            cam.yaw = _math.atan2(n.y(), n.x())
-        self.viewport.update()
-
     # ---- Display styles ----------------------------------------------------
     def _apply_display_style(self, preset) -> None:
         """Activate a built-in style (a COPY — presets stay pristine)."""
@@ -3725,9 +3349,6 @@ class MainWindow(QMainWindow):
             return
         setattr(style, name, bool(value))
         self.viewport.update()
-        browser = getattr(self, "project_browser", None)
-        if browser is not None and name == "section_fill":
-            browser.outliner.on_scene_changed()
 
     def _sync_style_menu(self) -> None:
         """Reflect the scene's active style in the menu (loads, scene recall)."""
@@ -3739,27 +3360,15 @@ class MainWindow(QMainWindow):
         for act, value in ((self._act_style_edges, style.edges),
                            (self._act_style_profiles, style.profiles),
                            (getattr(self, "_act_style_back_edges", None),
-                            getattr(style, "back_edges", False)),
-                           (getattr(self, "_act_section_fill", None),
-                            getattr(style, "section_fill", True))):
+                            getattr(style, "back_edges", False))):
             if act is None:      # menu still under construction
                 continue
             act.blockSignals(True)
             act.setChecked(value)
             act.blockSignals(False)
-        # The Styles/Shadows docks mirror the same state (guarded: the menu
-        # builds before the docks on startup). Loads and scene recalls land
-        # here too.
-        sh = getattr(self.viewport.scene, "shadows", None)
-        act = getattr(self, "_act_shadows", None)
-        if act is not None and sh is not None:
-            act.blockSignals(True)
-            act.setChecked(sh.enabled)
-            act.blockSignals(False)
+        # The Styles panel mirrors the same state (guarded: the menu builds
+        # before the panel on startup). Loads land here too.
         panel = getattr(self, "styles_panel", None)
-        if panel is not None:
-            panel.refresh()
-        panel = getattr(self, "shadows_panel", None)
         if panel is not None:
             panel.refresh()
 
@@ -3772,14 +3381,6 @@ class MainWindow(QMainWindow):
             self.viewport.history.execute(DeleteGuidesCommand(guides))
             self.viewport.update()
 
-    def _on_toggle_path_closed(self) -> None:
-        from georef.geopath import GeoPath
-        from core.history import ToggleGeoPathClosedCommand
-        paths = [p for p in self.viewport.scene.selection if isinstance(p, GeoPath)]
-        if paths:
-            self.viewport.history.execute(ToggleGeoPathClosedCommand(paths))
-            self.viewport.update()
-
     def _on_delete_selection(self) -> None:
         """Delete the current selection (any entity type), as one undoable step —
         the same logic the Select tool's Delete key runs, reachable from the
@@ -3788,9 +3389,8 @@ class MainWindow(QMainWindow):
         from core.dimension import Dimension
         from core.guide import Guide
         from core.textlabel import TextLabel
-        from georef.geopath import GeoPath
         from core.history import (
-            CompoundCommand, DeleteDimensionsCommand, DeleteGeoPathsCommand,
+            CompoundCommand, DeleteDimensionsCommand,
             DeleteGroupCommand, DeleteGuidesCommand,
             DeleteImagePlanesCommand, DeleteTextLabelsCommand,
             EraseSelectionCommand,
@@ -3804,10 +3404,7 @@ class MainWindow(QMainWindow):
         groups = [g for g in sel if isinstance(g, Group)]
         dims = [d for d in sel if isinstance(d, Dimension)]
         labels = [t for t in sel if isinstance(t, TextLabel)]
-        paths = [p for p in sel if isinstance(p, GeoPath)]
         guides = [g for g in sel if isinstance(g, Guide)]
-        from core.section import SectionPlane
-        splanes = [p for p in sel if isinstance(p, SectionPlane)]
         cmds = []
         if edges or faces:
             cmds.append(EraseSelectionCommand(edges, faces))
@@ -3817,15 +3414,10 @@ class MainWindow(QMainWindow):
         images = [im for im in sel if isinstance(im, ImagePlane)]
         if images:
             cmds.append(DeleteImagePlanesCommand(images))
-        if splanes:
-            from core.history import DeleteSectionPlanesCommand
-            cmds.append(DeleteSectionPlanesCommand(splanes))
         if dims:
             cmds.append(DeleteDimensionsCommand(dims))
         if labels:
             cmds.append(DeleteTextLabelsCommand(labels))
-        if paths:
-            cmds.append(DeleteGeoPathsCommand(paths))
         if cmds:
             self.viewport.history.execute(
                 cmds[0] if len(cmds) == 1 else CompoundCommand(cmds))
@@ -3860,16 +3452,12 @@ class MainWindow(QMainWindow):
         Unlock / Delete entries, or it could never be reached again."""
         from core.mesh import Edge, Face
         from core.dimension import Dimension
-        from georef.geopath import GeoPath
 
         sel = self.viewport.scene.selection
-        from core.section import SectionPlane
-        has_geopath = any(isinstance(e, GeoPath) for e in sel)
         has_group = any(isinstance(e, Group) for e in sel)
         has_mesh = any(isinstance(e, (Edge, Face)) for e in sel)
         # a single group alone has nothing to be grouped WITH (issue #35)
         lone_group = (len(sel) == 1 and has_group)
-        sec_planes = [e for e in sel if isinstance(e, SectionPlane)]
         menu = QMenu(self)
 
         # AutoCAD's first right-click entry: where a mouse-only hand looks.
@@ -3887,20 +3475,6 @@ class MainWindow(QMainWindow):
                            lambda im=locked_image: self._delete_image(im))
             menu.addSeparator()
 
-        if sec_planes:
-            # The section-plane context menu.
-            menu.addAction(tr("Reverse"), self._on_reverse_section)
-            act_active = menu.addAction(tr("Active Cut"),
-                                        self._on_toggle_active_section)
-            act_active.setCheckable(True)
-            act_active.setChecked(sec_planes[0].active)
-            menu.addAction(tr("Align View"), self._on_align_view_to_section)
-            # Rafael, 50:45: «no sé cómo cambiarle el 1 por AA o BB». The
-            # prompt only ever appeared the moment a plane was placed.
-            menu.addAction(tr("Name and symbol…"),
-                           lambda p=sec_planes[0]: self.prompt_section_name(p))
-            menu.addSeparator()
-
         from core.image_plane import ImagePlane
         images = [e for e in sel if isinstance(e, ImagePlane)]
         if images:
@@ -3911,21 +3485,6 @@ class MainWindow(QMainWindow):
             act_lock.setChecked(bool(images[0].locked))
             menu.addSeparator()
 
-        if has_geopath:
-            menu.addAction(tr("Terrain profile"), self._on_terrain_profile)
-            closed_paths = [e for e in sel
-                            if isinstance(e, GeoPath) and len(e.points) >= 3]
-            if closed_paths:
-                surf = menu.addMenu(tr("Terrain surface"))
-                surf.addAction(tr("Flat (single slope)"),
-                               lambda: self._on_set_surface("flat"))
-                surf.addAction(tr("Draped (follow relief)"),
-                               lambda: self._on_set_surface("draped"))
-                surf.addAction(tr("None (line only)"),
-                               lambda: self._on_set_surface(None))
-            menu.addAction(tr("Convert Path to Geometry"), self._on_convert_geopath)
-            menu.addAction(tr("Open / Close path"), self._on_toggle_path_closed)
-            menu.addSeparator()
         if (has_mesh or has_group) and not lone_group:
             # Groups too, since 2026-09-11: a group can hold groups, so the
             # entry has to be there when the selection is nothing but groups
@@ -4268,19 +3827,6 @@ class MainWindow(QMainWindow):
     _on_hide_edges = _on_hide
     _on_unhide_all_edges = _on_unhide_all
 
-    def _on_toggle_shadows(self, on: bool) -> None:
-        """Camera ▸ Shadows: flip the scene's sun on/off (the tray panel
-        holds the date/time/darkness detail)."""
-        sh = getattr(self.viewport.scene, "shadows", None)
-        if sh is None or sh.enabled == bool(on):
-            return
-        sh.enabled = bool(on)
-        self.viewport.scene.version += 1
-        panel = getattr(self, "shadows_panel", None)
-        if panel is not None:
-            panel.refresh()
-        self.viewport.update()
-
     @_repeatable("Divide")
     def _on_divide(self) -> None:
         """Divide the selected edges / curves into N equal pieces (#63)."""
@@ -4468,15 +4014,7 @@ class MainWindow(QMainWindow):
                                max(hi.z(), bounds[1].z()))
             bounds = (lo, hi)
         if bounds[0] is None:
-            # ``Scene.bounds()`` covers editable geometry only. A document
-            # holding just a survey (the normal state right after importing
-            # one) would otherwise make Zoom Extents do nothing at all.
-            survey = getattr(self.viewport.scene, "photo_mesh", None)
-            if survey is None or not getattr(survey, "visible", False):
-                return
-            bounds = survey.bounds()
-            if bounds[0] is None:
-                return
+            return
         self.viewport.camera.fit_box(bounds[0], bounds[1])
         self.viewport.update()
 
@@ -4508,243 +4046,8 @@ class MainWindow(QMainWindow):
             return None
         return QVector3D(*map(float, lo)), QVector3D(*map(float, hi))
 
-    def _ensure_composer(self):
-        """The composer window, created but not shown — the sheet strip's
-        menu manages sheets through it without opening it."""
-        if getattr(self, "_composer", None) is None:
-            from views.composer import ComposerWindow
-            self._composer = ComposerWindow(self)
-        return self._composer
-
-    def _sheet_tab_menu(self, index: int, global_pos) -> None:
-        self._ensure_composer().sheet_tab_menu(index, global_pos, self)
-        self._refresh_sheet_tabs()
-
-    def _on_open_composer(self) -> None:
-        """Open (or raise) the sheet composer — see docs/composer-plan.md."""
-        self._ensure_composer()
-        self._composer.show()
-        self._composer.raise_()
-        self._composer.activateWindow()
-
-    # ---- Model / sheet tabs (the strip at the bottom) -----------------------
-    def _refresh_sheet_tabs(self) -> None:
-        """This window shows the model, so its strip always marks «Model».
-        Beside it, ONE sheet: the last one opened — the model window only
-        goes model ↔ sheet, and all the sheets are tabs in the composer
-        (Marco, 23-09: «en el modelo solo alternar entre el modelo y la
-        lámina… cuando regrese a lámina, que regrese a la lámina 2»). A
-        document without sheets offers «+» instead."""
-        composer = getattr(self, "_composer", None)
-        if composer is not None and hasattr(composer, "views_panel"):
-            composer.views_panel.on_scene_changed()
-        tabs = getattr(self, "_sheet_tabs", None)
-        if tabs is None:
-            return
-        comps = getattr(self.viewport.scene, "compositions", None) or []
-        if not comps:
-            self._strip_sheets = []
-            tabs.set_show_new(True)
-            tabs.refresh([], None)
-            return
-        comp = getattr(getattr(self, "_composer", None), "comp", None)
-        if comp is not None and comp in comps:
-            last = comps.index(comp)
-        else:
-            last = min(max(getattr(self, "_last_sheet", 0), 0), len(comps) - 1)
-        self._last_sheet = last
-        self._strip_sheets = [last]
-        tabs.set_show_new(False)
-        tabs.refresh([comps[last].name], None)
-
-    def _to_sheets(self) -> None:
-        comps = getattr(self.viewport.scene, "compositions", None) or []
-        if not comps:
-            self._show_new_sheet()
-            return
-        last = min(max(getattr(self, "_last_sheet", 0), 0), len(comps) - 1)
-        self._show_sheet(last)
-
-    def _show_strip_sheet(self, k: int) -> None:
-        """A sheet tab of THIS strip (it shows only the last sheet)."""
-        sheets = getattr(self, "_strip_sheets", None) or []
-        self._show_sheet(sheets[k] if 0 <= k < len(sheets) else k)
-
-    def _strip_sheet_menu(self, k: int, pos) -> None:
-        sheets = getattr(self, "_strip_sheets", None) or []
-        self._sheet_tab_menu(sheets[k] if 0 <= k < len(sheets) else k, pos)
-
-    def _show_model(self) -> None:
-        self.show()
-        self.raise_()
-        self.activateWindow()
-        self._refresh_sheet_tabs()
-
-    def _show_sheet(self, index: int) -> None:
-        """A sheet tab: the composer opens on that sheet. This window keeps
-        showing the model, so its own strip snaps back to «Model»."""
-        self._last_sheet = index
-        self._on_open_composer()
-        self._composer.show_sheet(index)
-        self._refresh_sheet_tabs()
-
-    def _show_new_sheet(self) -> None:
-        """The «+» tab: the composer on a NEW sheet. A document without
-        sheets gets its first one just by opening the composer."""
-        comps = getattr(self.viewport.scene, "compositions", None) or []
-        had = len(comps)
-        self._on_open_composer()
-        if len(self.viewport.scene.compositions) == had:
-            self._composer._on_comp_add()
-        self._composer.show_sheet(len(self.viewport.scene.compositions) - 1)
-        self._refresh_sheet_tabs()
-
     def _on_standard_view(self, key: str) -> None:
         self.viewport.camera.set_view(key)
-        self.viewport.update()
-
-    def _on_terrain_profile(self) -> None:
-        """Show the profile dock and profile the current selection (Track G)."""
-        self.profile_dock.show()
-        self.profile_dock.raise_()
-        self.profile_dock.compute_from_selection()
-
-    def on_viewport_hover(self, screen_x: float, screen_y: float) -> None:
-        """Plan→profile link: mark the station of the route point under the
-        cursor in the open profile (Track G)."""
-        if self.profile_dock.isVisible():
-            self.profile_dock.indicate_at_screen(screen_x, screen_y)
-
-    # ---- Terrain-surface fill (Track G) -------------------------------------
-    def _surface_dem(self, datum):
-        """Shared DEM sampler for surface fills, rebuilt when the datum changes."""
-        if getattr(self, "_surf_sampler", None) is not None \
-                and self._surf_datum is datum:
-            return self._surf_sampler
-        from georef.dem import DEMSampler
-        self._surf_sampler = DEMSampler(datum, parent=self)
-        self._surf_datum = datum
-        self._surf_sampler.changed.connect(self._rebuild_surfaces)
-        self._surf_sampler.changed.connect(self._build_terrain)
-        return self._surf_sampler
-
-    def _on_set_surface(self, mode) -> None:
-        from georef.geopath import GeoPath
-        from core.history import SetGeoPathSurfaceCommand
-        paths = [p for p in self.viewport.scene.selection
-                 if isinstance(p, GeoPath) and len(p.points) >= 3]
-        if not paths:
-            return
-        self.viewport.history.execute(SetGeoPathSurfaceCommand(paths, mode))
-        self._rebuild_surfaces()
-
-    def _rebuild_surfaces(self) -> None:
-        """(Re)compute the 3D triangles of every surfaced path from the DEM."""
-        from georef.surface import build_surface
-        scene = self.viewport.scene
-        datum = getattr(scene, "georef", None)
-        surfaced = [p for p in scene.geo_paths if getattr(p, "surface", None)]
-        if datum is None:
-            for p in surfaced:
-                p._surface_tris = None
-            self.viewport.update()
-            return
-        sampler = self._surface_dem(datum)
-        area = None
-        for p in surfaced:
-            xs = [pt.x() for pt in p.points]
-            ys = [pt.y() for pt in p.points]
-            lo = self._local_to_ll(datum, min(xs), min(ys))
-            hi = self._local_to_ll(datum, max(xs), max(ys))
-            sampler.ensure_area(min(lo[0], hi[0]), min(lo[1], hi[1]),
-                                max(lo[0], hi[0]), max(lo[1], hi[1]))
-            p._surface_tris = build_surface(p, sampler, datum)
-        self.viewport.update()
-
-    @staticmethod
-    def _local_to_ll(datum, x, y):
-        from PySide6.QtGui import QVector3D
-        lat, lon, _ = datum.local_to_geodetic(QVector3D(x, y, 0.0))
-        return lat, lon
-
-    def _on_surfaces_scene_changed(self) -> None:
-        """Re-drape surfaced paths when their nodes move (version bump)."""
-        if any(getattr(p, "surface", None) for p in self.viewport.scene.geo_paths):
-            self._rebuild_surfaces()
-
-    # ---- 3D terrain (Track G, G2 full) --------------------------------------
-    def set_terrain_enabled(self, on: bool) -> None:
-        self._terrain_on = on
-        if on:
-            terrain = getattr(self.viewport.scene, "terrain", None)
-            if terrain is not None and not getattr(terrain, "visible", True):
-                terrain.visible = True      # hidden by a scene: just show it
-                self.viewport.update()
-                return
-            self._build_terrain()
-        else:
-            self.viewport.scene.terrain = None
-            self.viewport.upload_terrain(None)
-            self.viewport.update()
-
-    @staticmethod
-    def _capture_bbox(layer):
-        """Local-metre bounding box ``(minx, miny, maxx, maxy)`` of the capture
-        patches — the area the 3D terrain should cover."""
-        patches = getattr(layer, "patches", None) or [(0, 0, layer.radius_m,
-                                                        layer.radius_m)]
-        minx = min(cx - hw for cx, cy, hw, hh in patches)
-        maxx = max(cx + hw for cx, cy, hw, hh in patches)
-        miny = min(cy - hh for cx, cy, hw, hh in patches)
-        maxy = max(cy + hh for cx, cy, hw, hh in patches)
-        return minx, miny, maxx, maxy
-
-    def _build_terrain(self) -> None:
-        """(Re)build the 3D terrain from the DEM + base-map tiles (async-ready)."""
-        if not getattr(self, "_terrain_on", False):
-            return
-        from georef.terrain import build_mosaic, build_terrain
-        from georef.surface import ground_reference
-        scene = self.viewport.scene
-        datum = getattr(scene, "georef", None)
-        layer = getattr(scene, "tile_layer", None)
-        if datum is None or layer is None:
-            return
-        sampler = self._surface_dem(datum)
-        zoom = layer.zoom
-        # The terrain covers the captured area (the drawn patches' bounding box),
-        # not a fixed square — so the 3D matches what you captured.
-        bbox = self._capture_bbox(layer)
-        minx, miny, maxx, maxy = bbox
-        lo = self._local_to_ll(datum, minx, miny)
-        hi = self._local_to_ll(datum, maxx, maxy)
-        sampler.ensure_area(min(lo[0], hi[0]), min(lo[1], hi[1]),
-                            max(lo[0], hi[0]), max(lo[1], hi[1]))
-        self.viewport.prefetch_tiles(layer.source, layer.flat_tiles(datum), zoom)
-        # When a survey has already fixed the scene's vertical zero, the DEM
-        # terrain must use the SAME zero or the two grounds render tens of
-        # metres apart. (They still differ by the geoid/ellipsoid separation —
-        # that gap is real, not a bug, and is why elevations are labelled with
-        # where they came from.)
-        ground = float(datum.alt) if datum.alt else ground_reference(sampler, datum)
-        if ground is None:
-            return                         # DEM not ready — retry on changed
-        terrain = build_terrain(datum, sampler, ground, bbox, zoom=zoom)
-        if terrain is None:
-            return                         # DEM grid not fully loaded yet
-        first = scene.terrain is None
-        terrain.texture_image = build_mosaic(terrain, layer.images)
-        # An async rebuild keeps the visibility a scene may have set.
-        terrain.visible = True if first else bool(
-            getattr(scene.terrain, "visible", True))
-        scene.terrain = terrain
-        self.viewport.upload_terrain(terrain)
-        # Frame the terrain only the first time it appears (not on async rebuilds).
-        if first:
-            mn, mx = terrain.bounds()
-            if mn is not None:
-                self.viewport.camera.set_view("iso")
-                self.viewport.camera.fit_to(mn, mx)
         self.viewport.update()
 
     def _on_select_all(self) -> None:
@@ -4829,8 +4132,7 @@ class MainWindow(QMainWindow):
 
     # ---- File handling ------------------------------------------------------
     # ---- The document's camera (issue #60) ---------------------------------
-    _CAMERA_FIELDS = ("distance", "yaw", "pitch", "fov_deg", "perspective",
-                      "two_point")
+    _CAMERA_FIELDS = ("distance", "yaw", "pitch", "fov_deg", "perspective")
 
     def _camera_dict(self) -> dict:
         """The live camera as the document keeps it (the .skp format
@@ -4936,8 +4238,6 @@ class MainWindow(QMainWindow):
         self._workspace = workspace
         self.set_tool_filter(getattr(workspace, "allowed_tools", None))
         self._apply_camera_dict(getattr(workspace, "camera", None))
-        if getattr(self, "_sheet_tabs", None) is not None:
-            self._sheet_tabs.setVisible(False)   # sheets belong to the model
         self._update_title()
         return True
 
@@ -4961,8 +4261,6 @@ class MainWindow(QMainWindow):
         # set_document moved the version on: a model that was saved stays so.
         self._saved_version = self.viewport.scene.version if p["clean"] else -1
         self._apply_camera_dict(p["camera"])
-        if getattr(self, "_sheet_tabs", None) is not None:
-            self._sheet_tabs.setVisible(True)
         self._update_title()
         if hasattr(ws, "left"):
             ws.left()
@@ -5011,7 +4309,6 @@ class MainWindow(QMainWindow):
         self._insert_scale_figure()
         self.viewport.notify_scene_changed()
         self._sync_style_menu()
-        self._sync_section_menu()
         self._update_title()
         self.settle_heap()
 
@@ -5028,14 +4325,14 @@ class MainWindow(QMainWindow):
         copy came from."""
         from core import autosave
         folder = autosave.discarded_dir()
-        if not any(folder.glob("*.igz")):
+        if not any(folder.glob("*.faci3d")) and not any(folder.glob("*.igz")):
             QMessageBox.information(
                 self, tr("Recover a discarded auto-save…"),
                 tr("No discarded auto-saved copies yet."))
             return
         chosen, _ = file_dialogs.getOpenFileName(
             self, tr("Recover a discarded auto-save…"), str(folder),
-            tr("IngeTrazo auto-saves (*.igz)"))
+            tr("Auto-saved copies (*.faci3d *.igz)"))
         if not chosen:
             return
         if not self._confirm_discard(tr("Open another drawing?")):
@@ -5059,9 +4356,9 @@ class MainWindow(QMainWindow):
         return [str(x) for x in raw if str(x).strip()]
 
     def _remember_recent(self, path) -> None:
-        """Put ``path`` at the top of File ▸ Open Recent (native documents
+        """Put ``path`` at the top of File ▸ Open Recent (.faci3d projects
         only: an import is not a document you reopen)."""
-        if path is None or Path(path).suffix.lower() != ".igz":
+        if path is None or Path(path).suffix.lower() != igz_format.SUFFIX:
             return
         key = str(Path(path).resolve())
         recent = [x for x in self._recent_paths() if x != key]
@@ -5107,10 +4404,25 @@ class MainWindow(QMainWindow):
             return
         path_str, _ = file_dialogs.getOpenFileName(
             self,
-            tr("Open IngeTrazo document"),
+            tr("Open Faci3D project"),
             "",
-            tr(IGZ_FILE_FILTER),
+            tr(PROJECT_FILE_FILTER),
         )
+        if not path_str:
+            return
+        self.open_path(Path(path_str))
+
+    def _on_import_legacy(self) -> None:
+        """File ▸ Import ▸ IngeTrazo document: the .igz opens as a NEW,
+        unsaved project — Save then asks where to keep it as .faci3d, so
+        the original file is never written over."""
+        self.viewport.end_group_edit()
+        if not self._confirm_discard(
+                tr("Discard current drawing and open another?")):
+            return
+        path_str, _ = file_dialogs.getOpenFileName(
+            self, tr_upstream("Import IngeTrazo document"), "",
+            tr_upstream(LEGACY_FILE_FILTER))
         if not path_str:
             return
         self.open_path(Path(path_str))
@@ -5119,7 +4431,8 @@ class MainWindow(QMainWindow):
         """Open a document at ``path`` (File dialog, CLI argument, or the OS
         file association's double-click all land here).
 
-        ``.igz`` is our native format; ``.dae``/``.skp`` are the interchange
+        ``.faci3d`` is our native format and IngeTrazo's ``.igz`` opens as a
+        new unsaved project (see :meth:`_on_import_legacy`); ``.dae``/``.skp`` are the interchange
         formats we also register in the desktop entry, so double-clicking one
         imports it rather than failing to parse it as an IngeTrazo document.
         An extension may claim a suffix of its own
@@ -5139,16 +4452,13 @@ class MainWindow(QMainWindow):
             return import_svg_path(self, path)
         if suffix == ".skp":
             return self.import_skp_path(path)
-        if suffix == ".dxf":
-            return self._import_dxf_path(path)
-        if suffix == ".dwg":
-            return self._import_dwg_path(path)
+        legacy = suffix == igz_format.LEGACY_SUFFIX
         # An existing recovery slot for this document means a session that
         # never got to save it (the invariant in core/autosave.py) — offer
         # the auto-saved copy before loading the file itself.
         from core import autosave
         recovered = False
-        slot = autosave.pending(path)
+        slot = None if legacy else autosave.pending(path)
         if slot is not None:
             answer = QMessageBox.question(
                 self, tr("Recovered drawing"),
@@ -5191,37 +4501,22 @@ class MainWindow(QMainWindow):
         dlg.close()
         self.viewport.inference.reset()
         self._apply_camera_home()
-        self._current_path = path
-        self._remember_recent(path)
-        self._import_name = None
+        if legacy:
+            # Not a Faci3D project yet: named in the title, saved as
+            # .faci3d on the first Save (which asks where).
+            self._current_path = None
+            self._import_name = path.name
+        else:
+            self._current_path = path
+            self._remember_recent(path)
+            self._import_name = None
         self._autosaved_version = None
         # A recovered drawing is NOT the file on disk yet: keep it dirty so
         # the title shows * and Ctrl+S makes it real (the slot stays until
         # that clean save).
-        self._saved_version = (-1 if recovered
+        self._saved_version = (-1 if recovered or legacy
                                else self.viewport.scene.version)
         self._sync_style_menu()      # the document may carry its own style
-        self._sync_section_menu()
-        # A stored survey (Track G, G6) arrives as plain arrays + images; the
-        # GL upload only happens here, where there's a context.
-        survey = getattr(self.viewport.scene, "photo_mesh", None)
-        if survey is not None:
-            self.viewport.upload_photo_mesh(survey, getattr(survey, "images", None))
-            # Frame it. The default camera sits ~20 m out (sized for the scale
-            # figure) and a survey is hundreds of metres across, so without this
-            # the whole thing falls outside the far plane and the document opens
-            # looking empty — with the mesh loaded and invisible.
-            mn, mx = survey.bounds()
-            if mn is not None:
-                self.viewport.camera.set_view("iso")
-                self.viewport.camera.fit_to(mn, mx)
-        else:
-            self.viewport.release_photo_textures()
-        # Mirror the document's base map and survey into the tray, and refetch
-        # the tiles for the capture the document carries — otherwise the panel
-        # shows stale defaults over a scene that has its own.
-        self.georef_tray.base_map.sync_from_document()
-        self.georef_tray.base_map.sync_photo_mesh()
         repaired = getattr(self.viewport.scene, "load_repairs", 0)
         if repaired:
             # Pieces with a coordinate that is not a number (NaN / inf) were
@@ -5236,6 +4531,10 @@ class MainWindow(QMainWindow):
                    n=repaired, name=path.name), QMessageBox.Ok, self)
             box.setAttribute(Qt.WA_DeleteOnClose)
             box.open()                       # not modal to the event loop
+        if legacy:
+            self.statusBar().showMessage(tr(
+                "Imported {name}: Save keeps it as a .faci3d project.",
+                name=path.name), 8000)
         self.viewport.notify_scene_changed()
         self._update_title()
         self.settle_heap()
@@ -5270,7 +4569,8 @@ class MainWindow(QMainWindow):
             self._update_title()
             return
         self.viewport.end_group_edit()
-        if self._current_path is None:
+        if (self._current_path is None
+                or self._current_path.suffix.lower() != igz_format.SUFFIX):
             self._on_save_as()
             return
         self._do_save(self._current_path)
@@ -5281,20 +4581,26 @@ class MainWindow(QMainWindow):
             self._update_title()
             return
         self.viewport.end_group_edit()
-        default_name = (
-            self._current_path.name if self._current_path is not None else "untitled.igz"
-        )
+        if self._current_path is not None:
+            stem = self._current_path.stem
+        elif self._import_name:
+            stem = Path(self._import_name).stem    # casa.igz → casa.faci3d
+        else:
+            stem = "untitled"
         path_str, _ = file_dialogs.getSaveFileName(
             self,
-            tr("Save IngeTrazo document"),
-            default_name,
-            tr(IGZ_FILE_FILTER),
+            tr("Save Faci3D project"),
+            stem + igz_format.SUFFIX,
+            tr(PROJECT_FILE_FILTER),
         )
         if not path_str:
             return
         path = Path(path_str)
-        if path.suffix.lower() != ".igz":
-            path = path.with_suffix(".igz")
+        if path.suffix.lower() != igz_format.SUFFIX:
+            # "casa" → "casa.faci3d"; "casa.igz" → "casa.faci3d" too.
+            if path.suffix.lower() == igz_format.LEGACY_SUFFIX:
+                path = path.with_suffix("")
+            path = path.with_name(path.name + igz_format.SUFFIX)
         self._do_save(path)
 
     def _do_save(self, path: Path) -> None:
@@ -5336,6 +4642,7 @@ class MainWindow(QMainWindow):
                 tr("Saved — {n} texture(s) packed into the document.",
                    n=embedded), 4000)
         self._current_path = path
+        self._import_name = None
         self._remember_recent(path)
         self._saved_version = self.viewport.scene.version
         self._update_title()
@@ -5695,18 +5002,6 @@ class MainWindow(QMainWindow):
             tr("Click to place the component (Esc cancels)"), 4000)
         self.viewport.update()
 
-    def _on_get_models(self) -> None:
-        QMessageBox.information(
-            self, tr("Get more models and textures"),
-            tr("Free sources that open directly in IngeTrazo:") + "<br><br>"
-            "<b>Poly Haven</b> — <a href='https://polyhaven.com'>"
-            "polyhaven.com</a> " + tr("(CC0: models OBJ and PBR textures)")
-            + "<br><b>ambientCG</b> — <a href='https://ambientcg.com'>"
-            "ambientcg.com</a> " + tr("(CC0 textures — drop the PNG into "
-                                      "resources/textures)")
-            + "<br><b>Sketchfab</b> — <a href='https://sketchfab.com'>"
-            "sketchfab.com</a> " + tr("(filter by CC licence, download OBJ)"))
-
 
     def _import_progress(self, title):
         """A modal progress dialog + the callback the loaders call at
@@ -5972,36 +5267,6 @@ class MainWindow(QMainWindow):
             return
         self.import_skp_path(Path(path_str))
 
-    def _on_clear_texture_cache(self) -> None:
-        """Empty the app's texture cache (images extracted from .skp imports
-        and unpacked from .igz containers). Saved .igz documents carry their
-        own copy and re-extract on open; .skp-imported faces lose their texture
-        until the file is imported again — hence the confirmation."""
-        from core.texture import (clear_texture_cache, texture_cache_root,
-                                  texture_cache_stats)
-        count, size = texture_cache_stats()
-        if not count:
-            QMessageBox.information(
-                self, tr("Texture cache"),
-                tr("The texture cache is already empty.\n\n{path}",
-                   path=str(texture_cache_root())))
-            return
-        answer = QMessageBox.question(
-            self, tr("Clear texture cache"),
-            tr("Delete {count} image(s) ({mb:.1f} MB) from:\n{path}\n\n"
-               "Saved .igz documents carry their own copy and rebuild it when "
-               "opened. Faces textured by a .skp import that was never saved "
-               "lose their texture until you import the .skp again.",
-               count=count, mb=size / (1024 * 1024),
-               path=str(texture_cache_root())),
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            QMessageBox.StandardButton.No)
-        if answer != QMessageBox.StandardButton.Yes:
-            return
-        removed = clear_texture_cache()
-        self.statusBar().showMessage(
-            tr("Texture cache cleared ({count} files).", count=removed), 4000)
-
     def _obj_unit(self, path) -> "float | None":
         """The metres-per-unit factor for an OBJ, asked once per import.
 
@@ -6044,7 +5309,7 @@ class MainWindow(QMainWindow):
         start = (str(self._current_path.parent)
                  if self._current_path is not None else "")
         path_str, _ = file_dialogs.getOpenFileName(
-            self, tr("Import IngeTrazo document"), start, IGZ_FILE_FILTER)
+            self, tr("Project as component"), start, tr_upstream(ANY_PROJECT_FILTER))
         if not path_str:
             return
         path = Path(path_str)
@@ -6299,127 +5564,6 @@ class MainWindow(QMainWindow):
             SetImagePlaneOpacityCommand(image, pct / 100.0))
         self.viewport.update()
 
-    def _on_import_orthophoto(self) -> None:
-        """Import a GeoTIFF orthomosaic (a WebODM ``odm_orthophoto.tif``, a
-        QGIS export) as a georeferenced reference image: the file's own
-        pixel → UTM transform places it on the scene's datum at its true
-        size and orientation, so the model is traced over the real ground.
-        Display-only, like every reference image (invariant #4); locked on
-        arrival so a stray drag never moves the survey."""
-        from georef.datum import SceneDatum
-        from georef.geotiff import (GeoTiffError, describe, read_info,
-                                    read_rgba, rgba_to_qimage,
-                                    unsupported_reason)
-
-        path_str, _ = file_dialogs.getOpenFileName(
-            self, tr("Import orthomosaic"), "",
-            tr("GeoTIFF (*.tif *.tiff);;All files (*)"))
-        if not path_str:
-            return
-        path = Path(path_str)
-        try:
-            info = read_info(path)
-        except (GeoTiffError, OSError) as exc:
-            QMessageBox.critical(self, tr("Import orthomosaic"), str(exc))
-            return
-        if not info.georeferenced:
-            QMessageBox.warning(
-                self, tr("Import orthomosaic"),
-                tr("{name} carries no georeference (no map transform or an "
-                   "unknown coordinate system). Import it with "
-                   "File ▸ Import ▸ Image and size it by hand.",
-                   name=path.name))
-            return
-        reason = unsupported_reason(info)
-        if reason:
-            QMessageBox.critical(
-                self, tr("Import orthomosaic"),
-                tr("{name}: {reason} is not supported by this reader.",
-                   name=path.name, reason=reason))
-            return
-
-        scene = self.viewport.scene
-        corners = info.corners_geodetic()
-        datum = getattr(scene, "georef", None)
-        datum_existed = datum is not None
-        if datum is None:
-            # The picture knows where it is — anchor the scene on its centre
-            # rather than asking for coordinates the user would look up.
-            lat = sum(c[0] for c in corners) / 4.0
-            lon = sum(c[1] for c in corners) / 4.0
-            datum = SceneDatum(lat, lon)
-            scene.georef = datum
-
-        dlg, cb = self._import_progress(tr("Importing {name}…", name=path.name))
-        max_px = 8192
-        try:
-            max_px = max(1024, min(8192, int(self.viewport.max_texture_size())))
-        except Exception:  # noqa: BLE001 — no GL context yet: keep the default
-            pass
-        try:
-            rgba, factor = read_rgba(
-                info, max_px=max_px,
-                progress=lambda fr: (cb(fr * 0.9, "Decoding the orthomosaic…")
-                                     or True))
-        except (GeoTiffError, OSError, MemoryError) as exc:
-            dlg.close()
-            QMessageBox.critical(self, tr("Import orthomosaic"), str(exc))
-            return
-        cb(0.92, "Storing the picture…")
-        image = rgba_to_qimage(rgba)
-        del rgba
-        from PySide6.QtCore import QBuffer, QByteArray
-        from core.texture import cache_image
-        data = QByteArray()
-        buf = QBuffer(data)
-        buf.open(QBuffer.WriteOnly)
-        ext = "webp"
-        if not image.save(buf, "WEBP", 92):        # no WebP plugin: PNG
-            buf.close()
-            data = QByteArray()
-            buf = QBuffer(data)
-            buf.open(QBuffer.WriteOnly)
-            image.save(buf, "PNG")
-            ext = "png"
-        buf.close()
-        try:
-            cached = cache_image(bytes(data), f"{path.stem}.{ext}", "imported")
-        except OSError as exc:
-            dlg.close()
-            QMessageBox.critical(self, tr("Import orthomosaic"), str(exc))
-            return
-        dlg.close()
-
-        # Place it: the plane's origin is the picture's bottom-left, u its
-        # width, v its height — the corners come in that order, already
-        # turned by the datum's north angle. On the datum plane (Z = 0),
-        # like the base map.
-        from core.image_plane import ImagePlane
-        from core.history import AddImagePlaneCommand
-        bl, br, _tr, tl = [datum.geodetic_to_local(lat, lon)
-                           for lat, lon in corners]
-        u, v = br - bl, tl - bl
-        aspect = v.length() / u.length() if u.length() > 1e-9 else 1.0
-        plane = ImagePlane(str(cached), bl, u, v, aspect=aspect,
-                           name=path.stem, locked=True)
-        self.viewport.history.execute(AddImagePlaneCommand(plane))
-        if not datum_existed:
-            lo, hi = QVector3D(bl), QVector3D(bl)
-            for c in plane.corners():
-                lo = QVector3D(min(lo.x(), c.x()), min(lo.y(), c.y()), 0.0)
-                hi = QVector3D(max(hi.x(), c.x()), max(hi.y(), c.y()), 0.0)
-            self.georef_tray.base_map.setup_for_bounds(datum, lo, hi)
-            self.viewport.camera.set_view("top")
-            self.viewport.camera.fit_to(lo, hi)
-        self.georef_tray.on_scene_changed()
-        self.viewport.update()
-        w_m, h_m = u.length(), v.length()
-        self.statusBar().showMessage(
-            tr("Imported {name} — {w:.0f} × {h:.0f} m, {info}{reduced}",
-               name=path.name, w=w_m, h=h_m, info=describe(info),
-               reduced=(tr(", reduced {k}×", k=factor) if factor > 1 else "")),
-            8000)
-
     def _unlock_image(self, image) -> None:
         """Unlock one reference image (from the right-click over it) and
         select it, so the next click can move, resize or delete it."""
@@ -6473,410 +5617,6 @@ class MainWindow(QMainWindow):
         """Back to Select — what the Image tool calls once a picture is
         placed, so the next click doesn't stamp a second copy."""
         self._activate_tool("select")
-
-    def _on_import_dwg(self) -> None:
-        path_str, _ = file_dialogs.getOpenFileName(
-            self, tr("Import DWG"), "",
-            tr("AutoCAD DWG (*.dwg);;All files (*)"))
-        if path_str:
-            self._import_dwg_path(Path(path_str))
-
-    def _import_dwg_path(self, path: Path) -> bool:
-        """Import a DWG through the LibreDWG satellite (D3): convert to a
-        temporary DXF, feed the DXF pipeline, discard the temp. The user
-        never sees the intermediate — IngeCAD's dwg_bridge pattern."""
-        from formats.dwg_bridge import (DwgBridgeError, discard_temp_dxf,
-                                        dwg_to_dxf, have_dwg_support)
-
-        if not have_dwg_support():
-            QMessageBox.critical(
-                self, tr("Import DWG failed"),
-                tr("The LibreDWG converter (dwg2dxf) is not available in "
-                   "this installation.") + "\n\n" +
-                tr("To work on the drawing anyway: save it as DXF from your "
-                   "CAD program (or convert it with a free DWG → DXF "
-                   "converter such as ODA File Converter), then File ▸ "
-                   "Import ▸ AutoCAD DXF."))
-            return False
-        dlg, cb = self._import_progress(tr("Importing {name}…",
-                                           name=path.name))
-        cb(0.02, tr("Converting DWG…"))
-        try:
-            dxf = dwg_to_dxf(path)
-        except DwgBridgeError as exc:
-            dlg.close()
-            QMessageBox.critical(self, tr("Import DWG failed"), str(exc))
-            return False
-        dlg.close()
-        try:
-            ok = self._import_dxf_path(dxf, label=path)
-        finally:
-            discard_temp_dxf(dxf)
-        return ok
-
-    def _on_import_dxf(self) -> None:
-        path_str, _ = file_dialogs.getOpenFileName(
-            self, tr("Import DXF"), "",
-            tr("AutoCAD DXF (*.dxf);;All files (*)"))
-        if path_str:
-            self._import_dxf_path(Path(path_str))
-
-    def _import_dxf_path(self, path: Path, label: "Path | None" = None) -> bool:
-        """Import a DXF: 2D CAD linework as tagged layer groups (D1). The
-        unit comes from the header; a unitless file is asked about, the OBJ
-        importer's rule — never guess in silence. ``label`` is the file the
-        USER opened when ``path`` is an intermediate (the DWG bridge)."""
-        shown = label or path
-        from formats.dxf_in import (load_dxf, open_document,
-                                    suggest_unit_scale)
-
-        # ALWAYS confirmed, suggestion preselected (the OBJ importer's
-        # doctrine: asked, but with the answer already filled in). The
-        # suggestion measures the drawing itself, because CAD headers lie —
-        # this session's test plan declares millimetres while drawn in
-        # metres. Parsed once; the same document feeds the load.
-        try:
-            doc = open_document(path)
-        except Exception as exc:  # noqa: BLE001 — unreadable file
-            QMessageBox.critical(self, tr("Import DXF failed"), str(exc))
-            return False
-        suggested, _code = suggest_unit_scale(doc)
-        scale = self._dxf_unit(shown, suggested)
-        if scale is None:
-            return False
-        dlg, cb = self._import_progress(tr("Importing {name}…",
-                                           name=shown.name))
-        stats: dict = {}
-        cmd = SnapshotImport(
-            lambda scene: stats.update(
-                load_dxf(scene, path, progress=cb, scale=scale, doc=doc,
-                         name=shown.stem)))
-        try:
-            self.viewport.history.execute(cmd)
-        except Exception as exc:  # noqa: BLE001 — surface parse errors
-            dlg.close()
-            QMessageBox.critical(self, tr("Import DXF failed"), str(exc))
-            return False
-        self._prepare_import_display(cmd, cb)
-        dlg.close()
-        # A plan drawn kilometres from the origin (or huge next to the 20 m
-        # default camera) reads as "nothing imported" without this.
-        self._on_zoom_extents()
-        self.viewport.update()
-        self._import_name = shown.name
-        self._update_title()
-        msg = tr("Imported {name}: {edges} edges in {groups} tagged groups",
-                 name=shown.name, edges=stats.get("edges", 0),
-                 groups=stats.get("groups", 0))
-        offset = stats.get("offset")
-        if offset:
-            msg += "  ·  " + tr(
-                "moved near the origin (survey coordinates); offset "
-                "{x:,.0f}, {y:,.0f} m", x=offset[0], y=offset[1])
-        self.statusBar().showMessage(msg, 8000)
-        return True
-
-    def _dxf_unit(self, path, header_scale=None) -> "float | None":
-        """Confirm the drawing's unit. The header's declaration (when there
-        is one) arrives preselected; without one, the last answer does —
-        importing a batch from one office is Enter, Enter, Enter."""
-        from PySide6.QtWidgets import QInputDialog
-
-        keys = ["mm", "cm", "m", "in", "ft"]
-        factors = {"mm": 0.001, "cm": 0.01, "m": 1.0,
-                   "in": 0.0254, "ft": 0.3048}
-        labels = [tr("Millimetres"), tr("Centimetres"), tr("Metres"),
-                  tr("Inches"), tr("Feet")]
-        by_scale = {v: k for k, v in factors.items()}
-        last = (by_scale.get(header_scale)
-                or str(QSettings().value("import/dxf_unit", "mm") or "mm"))
-        idx = keys.index(last) if last in keys else 0
-        label, ok = QInputDialog.getItem(
-            self, tr("Import DXF"),
-            tr("What unit is this drawing in? (CAD headers often lie)"),
-            labels, idx, False)
-        if not ok:
-            return None
-        key = keys[labels.index(label)]
-        QSettings().setValue("import/dxf_unit", key)
-        return factors[key]
-
-    def _on_import_photomesh(self) -> None:
-        """Import a WebODM/ODM photogrammetric survey as georeferenced reference
-        geometry (Track G, G6) — the drone flight you then trace on top of.
-
-        Display-only: it goes to ``scene.photo_mesh``, never through the
-        topology engine (invariant #4).
-        """
-        from georef.datum import SceneDatum, utm_inverse
-        from georef.photomesh import find_anchor, load_odm_obj
-
-        path_str, _ = file_dialogs.getOpenFileName(
-            self, tr("Import photogrammetric mesh"), "",
-            tr("ODM textured model (*.obj);;All files (*)"))
-        if not path_str:
-            return
-        path = Path(path_str)
-
-        scene = self.viewport.scene
-        anchor = find_anchor(path)
-        datum = getattr(scene, "georef", None)
-        datum_existed = datum is not None
-        if datum is None:
-            # The survey knows where it is — anchor the scene on it rather than
-            # making the user type coordinates they'd have to look up.
-            if anchor is None:
-                QMessageBox.warning(
-                    self, tr("Import photogrammetric mesh"),
-                    tr("This model is not georeferenced and the scene has no "
-                       "datum yet. Set a location in the Terrain tray first, or "
-                       "pick an ODM export that includes "
-                       "odm_georeferencing_model_geo.txt."))
-                return
-            lat, lon = utm_inverse(anchor.east, anchor.north,
-                                   anchor.zone, anchor.northern)
-            datum = SceneDatum(lat, lon)
-            scene.georef = datum
-
-        # Load with ODM's own heights untouched (ground_ref=0). The scene's
-        # vertical zero is decided below, from the survey alone — never from the
-        # DEM, which is a different vertical datum and would also make the
-        # result depend on whether tiles had downloaded yet.
-        dlg, cb = self._import_progress(tr("Importing {name}…", name=path.name))
-        mesh, images, exc = self._load_photomesh_threaded(path, datum, 0.0, cb)
-        if exc is not None:
-            dlg.close()
-            QMessageBox.critical(self, tr("Import failed"), str(exc))
-            return
-        if mesh is None or mesh.triangle_count == 0:
-            dlg.close()
-            self.statusBar().showMessage(
-                tr("No triangles found in the model."), 4000)
-            return
-
-        # ---- The vertical zero ------------------------------------------
-        # The scene works in local metres, so the survey's ~1750 m of altitude
-        # has to come off. What matters is that the amount taken off is
-        # RECORDED: datum.alt is the absolute elevation of local Z=0, so every
-        # elevation can be reported as a real altitude instead of a number
-        # floating above an unknown reference.
-        from georef.photomesh import vertical_origin
-        if datum_existed and datum.alt:
-            # An established scene already has a vertical zero; a second survey
-            # joins it rather than redefining it, or the two would not line up.
-            origin = float(datum.alt)
-        else:
-            origin = vertical_origin(mesh)
-            if origin is None:
-                origin = 0.0
-            datum.alt = origin
-
-        if origin:
-            mesh.vertices[:, 2] -= origin
-            mesh.invalidate_index()     # the geometry moved under the index
-
-        mesh.visible = True
-        # Its own layer, so switching the survey off to look at what you drew
-        # doesn't take your model with it.
-        from core.layers import SURVEY_LAYER, Layer
-        if scene.layer(SURVEY_LAYER) is None:
-            scene.layers.append(Layer(SURVEY_LAYER))
-        mesh.layer = SURVEY_LAYER
-        # Keep the downscaled atlases on the mesh so saving the document does
-        # not depend on the ODM export still being where it was imported from.
-        mesh.images = images or {}
-        scene.photo_mesh = mesh
-        self.viewport.upload_photo_mesh(mesh, mesh.images)
-        self.georef_tray.base_map.sync_photo_mesh()
-
-        # Point the base map at the flown ground. Survey and imagery already
-        # share the datum, so they line up by construction — but the tile layer
-        # only fetches the area it was told to capture, and by default that's a
-        # square at the origin. Without this the imagery is simply absent under
-        # the survey, which looks exactly like "it doesn't line up".
-        mn, mx = mesh.bounds()
-        if mn is not None:
-            self.georef_tray.base_map.setup_for_bounds(datum, mn, mx)
-        self.georef_tray.raise_()
-        dlg.close()
-        if mn is not None:
-            self.viewport.camera.set_view("iso")
-            self.viewport.camera.fit_to(mn, mx)
-        self.viewport.update()
-        missing = mesh.missing_textures
-        if missing:
-            self.statusBar().showMessage(
-                tr("Imported {name} — {n} texture(s) not found").format(
-                    name=path.name, n=len(missing)), 6000)
-        else:
-            self.statusBar().showMessage(
-                tr("Imported {name} — {t} triangles").format(
-                    name=path.name, t=f"{mesh.triangle_count:,}"), 4000)
-
-    def _on_photo_progress(self, fraction: float, text: str) -> None:
-        """Progress from the import worker, delivered on the UI thread."""
-        callback = getattr(self, "_photo_progress", None)
-        if callback is not None:
-            callback(fraction, text)
-
-    def _load_photomesh_threaded(self, path, datum, ground, cb):
-        """Parse the OBJ and decode its atlases off the UI thread.
-
-        Both halves are slow enough to freeze the window — the real survey this
-        was built against is 40 MB of OBJ plus 455 MB of PNG, and one atlas
-        alone takes ~9 s to decode the first time. Neither touches ``Scene``,
-        so both are safe off-thread; the GL upload stays with the caller.
-        """
-        from PySide6.QtCore import QEventLoop, QObject, QThread, Qt, Signal
-
-        from georef.photomesh import load_atlas, load_odm_obj, plan_texture_sizes
-
-        gl_max = self.viewport.max_texture_size()
-
-        class _Worker(QObject):
-            progressed = Signal(float, str)
-            finished = Signal(object, object, object)   # (mesh, images, exc)
-
-            def run(self):
-                try:
-                    self.progressed.emit(0.05, "Reading mesh…")
-                    mesh = load_odm_obj(path, datum, ground_ref=ground)
-
-                    from PySide6.QtGui import QImageReader
-                    sizes, index_of = [], []
-                    for i, material in enumerate(mesh.materials):
-                        if material.texture is None or not material.texture.is_file():
-                            continue
-                        reader = QImageReader(str(material.texture))
-                        size = reader.size()
-                        if not size.isValid():
-                            continue
-                        sizes.append((size.width(), size.height()))
-                        index_of.append(i)
-
-                    targets = plan_texture_sizes(sizes, gl_max)
-                    images = {}
-                    for n, (i, target) in enumerate(zip(index_of, targets)):
-                        self.progressed.emit(
-                            0.15 + 0.85 * n / max(1, len(index_of)),
-                            "Loading textures…")
-                        image = load_atlas(mesh.materials[i].texture, target)
-                        if not image.isNull():
-                            images[i] = image
-                    self.finished.emit(mesh, images, None)
-                except Exception as exc:  # noqa: BLE001 — reported to caller
-                    self.finished.emit(None, None, exc)
-
-        thread = QThread(self)
-        worker = _Worker()
-        worker.moveToThread(thread)
-        result = {}
-
-        # A BOUND METHOD, not a lambda. A queued connection to a bare lambda has
-        # no receiver QObject to marshal into, so Qt ends up running it on the
-        # *worker* thread and the progress dialog's timer gets stopped
-        # cross-thread ("Timers cannot be stopped from another thread"). Bound
-        # to ``self``, delivery lands on the UI thread where the dialog lives.
-        self._photo_progress = cb
-        worker.progressed.connect(self._on_photo_progress, Qt.QueuedConnection)
-
-        loop = QEventLoop()
-
-        def _done(mesh, images, exc):
-            result.update(mesh=mesh, images=images, exc=exc)
-            loop.quit()
-
-        worker.finished.connect(_done, Qt.QueuedConnection)
-        thread.started.connect(worker.run)
-        thread.start()
-        loop.exec()
-        thread.quit()
-        thread.wait()
-        worker.deleteLater()
-        return result.get("mesh"), result.get("images"), result.get("exc")
-
-    def _on_import_georef(self) -> None:
-        """Import a KML/KMZ/GeoJSON alignment as georeferenced GeoPath traces —
-        located via the datum, ready to profile / measure (Track G)."""
-        from georef.geoimport import load_features
-        from georef.datum import SceneDatum
-        from georef.geopath import GeoPath
-        from core.history import AddGeoPathCommand, CompoundCommand
-
-        path_str, _ = file_dialogs.getOpenFileName(
-            self, tr("Import georef"), "",
-            tr("Georef (*.kml *.kmz *.geojson *.json);;All files (*)"))
-        if not path_str:
-            return
-        try:
-            feats = load_features(Path(path_str))
-        except Exception as exc:  # noqa: BLE001
-            QMessageBox.critical(self, tr("Import failed"), str(exc))
-            return
-        feats = [f for f in feats if len(f.points) >= 2]
-        if not feats:
-            self.statusBar().showMessage(
-                tr("No lines or polygons found in the file."), 4000)
-            return
-
-        scene = self.viewport.scene
-        datum = getattr(scene, "georef", None)
-        if datum is None:      # anchor the scene at the imported data's centre
-            pts = [p for f in feats for p in f.points]
-            datum = SceneDatum(sum(p[0] for p in pts) / len(pts),
-                               sum(p[1] for p in pts) / len(pts))
-            scene.georef = datum
-
-        cmds = []
-        for f in feats:
-            local = [datum.geodetic_to_local(la, lo) for la, lo in f.points]
-            cmds.append(AddGeoPathCommand(GeoPath(local, closed=f.closed,
-                                                  name=f.name)))
-        self.viewport.history.execute(
-            cmds[0] if len(cmds) == 1 else CompoundCommand(cmds))
-
-        # Sync the base-map panel + set a reference capture around the import.
-        self.georef_tray.base_map.setup_for_import(datum, scene.geo_paths)
-        self.georef_tray.raise_()
-        # Frame the imported traces (top view).
-        self._frame_geo_paths(scene.geo_paths)
-        self.statusBar().showMessage(
-            tr("Imported {n} feature(s) from {name}").format(
-                n=len(feats), name=Path(path_str).name), 4000)
-
-    def _frame_geo_paths(self, paths) -> None:
-        from PySide6.QtGui import QVector3D
-        pts = [p for gp in paths for p in gp.points]
-        if not pts:
-            return
-        mn = QVector3D(min(p.x() for p in pts), min(p.y() for p in pts), 0.0)
-        mx = QVector3D(max(p.x() for p in pts), max(p.y() for p in pts), 0.0)
-        self.viewport.camera.set_view("top")
-        self.viewport.camera.fit_to(mn, mx)
-        self.viewport.update()
-
-    def _on_export_ifc(self) -> None:
-        self.viewport.end_group_edit()
-        from core.bim import collect_objects
-        if not collect_objects(self.viewport.scene):
-            QMessageBox.information(
-                self, tr("Export IFC"),
-                tr("Nothing to export: tag geometry in the BIM panel first "
-                   "(only tagged objects go to IFC)."))
-            return
-        path_str, _ = file_dialogs.getSaveFileName(
-            self, tr("Export IFC"), "model.ifc",
-            tr("IFC4 (*.ifc);;All files (*)"))
-        if not path_str:
-            return
-        try:
-            count = ifc_format.save_ifc(self.viewport.scene, path_str)
-        except Exception as exc:  # noqa: BLE001
-            QMessageBox.critical(self, tr("Export IFC failed"), str(exc))
-            return
-        self.statusBar().showMessage(
-            tr("{n} IFC elements exported to {path}",
-               n=count, path=path_str), 5000)
 
     def _on_export_stl(self) -> None:
         # An STL records no unit and slicers read it as millimetres, so the
@@ -6958,50 +5698,6 @@ class MainWindow(QMainWindow):
         """COLLADA export — the 'open it back in the original program' bridge. Copies the
         texture images beside the .dae (send both, or use GLB)."""
         self._export("COLLADA", "dae", tr("COLLADA (*.dae)"), dae_format.save_dae)
-
-    def _on_import_survey_points(self) -> None:
-        """File-menu twin of the Terrain panel's survey-CSV import, so every
-        way into the model lives under File ▸ Import."""
-        self.georef_tray.survey._on_import()
-        self.georef_tray.raise_()
-
-    def _on_export_view_dxf(self) -> None:
-        """The view on screen as a 2D line drawing for CAD, hidden lines
-        removed (José Castro Basso, FADU–UDELAR). Parallel: true size in
-        metres, edges / profiles / section cut on their own layers, as the
-        composer's «Export view as DXF». Perspective (two-point included):
-        what the window shows, true size at the depth of the orbit
-        target."""
-        path, _ = file_dialogs.getSaveFileName(
-            self, tr("Export current view as DXF"), "vista.dxf",
-            "DXF (*.dxf)")
-        if not path:
-            return
-        from core.hlr import (KIND_CUT, KIND_PROFILE, hlr_drawing,
-                              hlr_perspective)
-        from formats.dxf_out import save_dxf_layers
-        vp = self.viewport
-        QApplication.setOverrideCursor(Qt.WaitCursor)
-        try:
-            geometry = vp.hlr_geometry()
-            if vp.camera.perspective:
-                groups = [("VISTA", hlr_perspective(vp.scene, vp.camera,
-                                                    geometry=geometry))]
-            else:
-                d = hlr_drawing(vp.scene, vp.camera, geometry=geometry)
-                k = d.kinds
-                groups = [("VISTA", d.segs[(k != KIND_CUT)
-                                           & (k != KIND_PROFILE)]),
-                          ("VISTA-PERFIL", d.segs[k == KIND_PROFILE]),
-                          ("VISTA-CORTE", d.segs[k == KIND_CUT])]
-            n = save_dxf_layers(path, groups)
-        except Exception as exc:  # noqa: BLE001
-            QApplication.restoreOverrideCursor()
-            QMessageBox.critical(self, tr("Export DXF failed"), str(exc))
-            return
-        QApplication.restoreOverrideCursor()
-        self.statusBar().showMessage(
-            tr("Exported {n} lines to {name}", n=n, name=path), 5000)
 
     def _on_export_image(self) -> None:
         """Hi-res 2D export of the current view ('Export 2D
@@ -7119,7 +5815,6 @@ class MainWindow(QMainWindow):
             name = tr("Untitled")
         marker = " *" if self._is_dirty() else ""
         self.setWindowTitle(f"{APP_NAME} — {name}{marker}")
-        self._refresh_sheet_tabs()      # a new / opened document: its sheets
 
     # ---- Window lifecycle ---------------------------------------------------
     def closeEvent(self, event) -> None:
@@ -7145,8 +5840,7 @@ class MainWindow(QMainWindow):
                                     and clean_state is not None)
                     else self.saveState())
         st.setValue("ui/window_geometry", self.saveGeometry())
-        # Free every GL texture while a GL context still exists — the survey
-        # atlases (hundreds of MB), the tile and terrain textures, and the
+        # Free every GL texture while a GL context still exists — the
         # general texture cache (faces, reference images). Letting Qt tear
         # them down leaks each with a "Texture has not been destroyed"
         # warning; the context's aboutToBeDestroyed hook alone fires too late

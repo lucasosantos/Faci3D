@@ -140,12 +140,12 @@ def test_a_wall_hides_the_guide_behind_it():
 
 
 def test_a_sheet_render_still_carries_no_guides():
-    """A styled composer frame never drew the scaffolding and must not
-    start now that the pass moved into GL."""
+    """A styled render never drew the scaffolding and must not start now
+    that the pass moved into GL."""
     win, vp = _scene_looking_down_minus_y()
     try:
         from core.style import style_by_name
-        vp.style_override = style_by_name("Architectural")
+        vp.style_override = style_by_name("Hidden line")
         try:
             bare = _pixels(vp.render_image(300, 300, overlays=False))
             vp.scene.guides[:] = [Guide(V(0, 4, 0), V(1, 0, 0))]

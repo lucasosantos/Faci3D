@@ -27,20 +27,15 @@ from core.textlabel import TextLabel
 from core.group import Group
 from core.mesh import Edge, Face
 from core.guide import Guide
-from core.section import SectionPlane
 from core.history import (
     CompoundCommand,
     DeleteDimensionsCommand,
-    DeleteGeoPathsCommand,
     DeleteGroupCommand,
     DeleteGuidesCommand,
-    DeleteSectionPlanesCommand,
     DeleteTextLabelsCommand,
-    SetActiveSectionCommand,
     EditTextLabelCommand,
     EraseSelectionCommand,
 )
-from georef.geopath import GeoPath
 from tools.base import Tool, ToolContext
 
 
@@ -263,14 +258,6 @@ class SelectTool(Tool):
         label = pick_label(screen_x, screen_y) if pick_label else None
         if label is not None:
             return label
-        path = viewport.pick_geopath(screen_x, screen_y)
-        if path is not None:
-            return path
-        # Section planes pick by their frame, above guides.
-        pick_sec = getattr(viewport, "pick_section_plane", None)
-        sec = pick_sec(screen_x, screen_y) if pick_sec else None
-        if sec is not None:
-            return sec
         # Guides select the usual way (click + Delete / right-click). Real
         # geometry outranks them; a guide crossing a face still beats the face
         # (a thin line is the more deliberate target).
@@ -338,13 +325,6 @@ class SelectTool(Tool):
             # letters are groups); re-editing the text is the right-click's
             # «Edit 3D Text…» (Marco, 2026-09-18).
             viewport.begin_group_edit(entity)
-            return
-        if isinstance(entity, SectionPlane):
-            # Double-clicking a section plane toggles the active cut.
-            viewport.history.execute(SetActiveSectionCommand(
-                None if entity.active else entity))
-            viewport.scene.select([entity])
-            viewport.update()
             return
         if isinstance(entity, TextLabel):
             # As usual, double-clicking a leader text edits its text.
@@ -609,9 +589,7 @@ def erase_entities(viewport, entities) -> bool:
     groups = [g for g in entities if isinstance(g, Group)]
     dims = [d for d in entities if isinstance(d, Dimension)]
     labels = [t for t in entities if isinstance(t, TextLabel)]
-    paths = [p for p in entities if isinstance(p, GeoPath)]
     guides = [g for g in entities if isinstance(g, Guide)]
-    splanes = [p for p in entities if isinstance(p, SectionPlane)]
     commands = []
     if edges or faces:
         # Erasing an edge between two coplanar faces merges them back
@@ -620,14 +598,10 @@ def erase_entities(viewport, entities) -> bool:
     commands.extend(DeleteGroupCommand(g) for g in groups)
     if guides:
         commands.append(DeleteGuidesCommand(guides))
-    if splanes:
-        commands.append(DeleteSectionPlanesCommand(splanes))
     if dims:
         commands.append(DeleteDimensionsCommand(dims))
     if labels:
         commands.append(DeleteTextLabelsCommand(labels))
-    if paths:
-        commands.append(DeleteGeoPathsCommand(paths))
     if not commands:
         return False
     cmd = commands[0] if len(commands) == 1 else CompoundCommand(commands)

@@ -24,7 +24,6 @@ from PySide6.QtWidgets import QApplication  # noqa: E402
 if QApplication.instance() is None:
     QApplication([])
 
-from core.section import SectionPlane  # noqa: E402
 from core.style import Style  # noqa: E402
 from tools.pushpull import PushPullTool  # noqa: E402
 from views.viewport import Viewport  # noqa: E402
@@ -107,26 +106,6 @@ def test_xray_and_wireframe_snap_through_the_lid():
                                    face_mode="hidden_line")
     assert _hover_at(tool, vp, V(2, 2, 2)) != 2.0
 
-
-def test_a_corner_on_the_cut_side_of_a_section_plane_is_not_a_reference():
-    vp = _vp()
-    base = _scene_with_reference_vertex(vp)
-    tool = _dragging_tool(base)
-    # The plane at z=1.5 hiding everything above it — the corner at z=2 is
-    # on the hidden side, in full view of the camera but gone from the model.
-    sp = SectionPlane(V(2, 2, 1.5), V(0, 0, 1))
-    vp.scene.section_planes.append(sp)
-    vp.scene.set_active_section(sp)
-    assert _hover_at(tool, vp, V(2, 2, 2)) is None
-    assert tool._inference_kind is None
-    # Flip the cut — the same corner is the model again.
-    sp.flip()
-    assert _hover_at(tool, vp, V(2, 2, 2)) == 2.0
-    assert tool._inference_kind == "vertex"
-    # And the cut is the cut in X-ray too: what it hides is not snappable.
-    vp.scene.display_style = Style(name="X-ray", face_mode="xray")
-    sp.flip()
-    assert _hover_at(tool, vp, V(2, 2, 2)) is None
 
 
 def test_an_edge_reference_hidden_behind_geometry_is_skipped():

@@ -29,8 +29,6 @@ ROOT = Path(SPECPATH).resolve()
 datas = [
     ('resources/shaders/*.vert',   'resources/shaders'),
     ('resources/shaders/*.frag',   'resources/shaders'),
-    # Render with Blender (#181): the script Blender runs on the job.
-    ('resources/blender/*.py',     'resources/blender'),
     ('resources/icons/*.png',      'resources/icons'),
     ('resources/icons/*.ico',      'resources/icons'),
     ('resources/icons/mimetypes/*.ico', 'resources/icons/mimetypes'),
@@ -68,65 +66,18 @@ for opt_src, opt_dst in [
     if (ROOT / opt_src).is_dir():
         datas.append((opt_src, opt_dst))
 
-# The DWG satellite (LibreDWG dwg2dxf, see vendor/libredwg/SOURCES.md),
-# found by formats/dwg_bridge.py at vendor/libredwg/bin inside the bundle
-# (#101). Linux: the ELF in git. Windows: dwg2dxf.exe and its two DLLs,
-# which build-windows.yml fetches from LibreDWG's own win64 release.
-# macOS: built from the release tarball by release-macos.yml. A platform
-# whose files are not there builds without DWG, and --check says so.
-import sys as _sys
-
-
-def _is_macho(path):
-    """True when *path* begins with a Mach-O / universal binary magic.
-
-    macOS builds its dwg2dxf from the LibreDWG tarball in release-macos.yml;
-    the file committed to git is the LINUX ELF, so a plain macOS checkout
-    must not bundle it (a dead 15 MB binary that also fooled --check).
-    """
-    try:
-        head = path.read_bytes()[:4]
-    except OSError:
-        return False
-    return head in (b"\xcf\xfa\xed\xfe", b"\xce\xfa\xed\xfe",
-                    b"\xfe\xed\xfa\xcf", b"\xfe\xed\xfa\xce",
-                    b"\xca\xfe\xba\xbe", b"\xbe\xba\xfe\xca")
-
-
-_DWG_FILES = {
-    "linux": ["dwg2dxf"],
-    "win32": ["dwg2dxf.exe", "libredwg-0.dll", "libiconv-2.dll"],
-    "darwin": ["dwg2dxf"],
-}
-for _plat, _names in _DWG_FILES.items():
-    if _sys.platform.startswith(_plat):
-        for _n in _names:
-            _src = ROOT / "vendor/libredwg/bin" / _n
-            if not _src.is_file():
-                continue
-            if _plat == "darwin" and not _is_macho(_src):
-                print('spec: dwg2dxf is not a Mach-O — not bundled (macOS '
-                      'DWG needs the LibreDWG build from release-macos.yml)')
-                continue
-            datas.append((f"vendor/libredwg/bin/{_n}", "vendor/libredwg/bin"))
-        datas.append(("vendor/libredwg/SOURCES.md", "vendor/libredwg"))
-
 # ── Hidden imports ───────────────────────────────────────────────────────────
 hiddenimports = [
     # Qt submodules sometimes missed by static analysis.
     'PySide6.QtOpenGL',
     'PySide6.QtOpenGLWidgets',
-    'PySide6.QtNetwork',        # tile/DEM fetch (georef)
+    'PySide6.QtNetwork',        # extension catalog, AI assistant
     # Lazily imported project modules (inside functions) — listed for safety.
     'core.text3d',
     'core.textlabel',
 ]
 
-# ezdxf (DXF/DWG import) is imported INSIDE functions — without this the
-# packaged build ships with CAD import dead (the core.ai lesson again).
-# collect_submodules because ezdxf lazy-loads its own internals too.
 from PyInstaller.utils.hooks import collect_submodules
-hiddenimports += collect_submodules('ezdxf')
 # manifold3d (Solid Tools) is imported inside core.solids' functions — one
 # self-contained native extension module (libstdc++/libm/libc only).
 hiddenimports += ['manifold3d', 'core.solids', 'tools.solid_tools']
@@ -144,16 +95,9 @@ hiddenimports += [
     # server falls back to a short string and the model goes back to
     # probing the API, which is the very waste it exists to stop.
     'core.ai_recipes',
-    'core.bim',
-    # Render with Blender (#181): the plugin's logic and the GLB it sends.
-    'core.render_blender',
     'formats.gltf',
     'tools.place_group',
     'tools.paste',
-    'georef.points',
-    'georef.terrain',
-    'georef.dem',
-    'georef.profile',
     # Pure-Python .skp backend (upstream openskp: classic-MFC + VFF readers
     # and the legacy writer) — imported lazily by formats/skp.py and
     # formats/skp_out.py.
@@ -314,16 +258,6 @@ if sys.platform.startswith('linux'):
     print('spec: dropped %d bundled X libraries (issue #6)'
           % (_before - len(a.binaries)))
 
-# The DWG converter's DLLs live beside dwg2dxf.exe in vendor/libredwg/bin,
-# where Windows looks for them when the .exe starts. PyInstaller also
-# collects them into the bundle's root as dependencies of that .exe: a
-# second copy of 31 MB nobody loads (#101).
-if sys.platform == 'win32':
-    _DWG_DLLS = {'libredwg-0.dll', 'libiconv-2.dll'}
-    a.binaries = [b for b in a.binaries
-                  if not (Path(b[0]).name.lower() in _DWG_DLLS
-                          and Path(b[0]).parent == Path('.'))]
-
 pyz = PYZ(a.pure, a.zipped_data)
 
 icon = None
@@ -418,14 +352,21 @@ if sys.platform == 'darwin':
             # no window, no menu bar — a GUI app must say so explicitly.
             'LSBackgroundOnly': False,
             'NSHumanReadableCopyright': 'GPL-3.0-or-later — Faci3D, based on IngeTrazo by Marco Sumari Tellez and contributors',
-            # .igz / .skp double-click-to-open, same association the other
-            # platforms register (packaging/ingetrazo.desktop, the .iss).
+            # .faci3d / .igz / .skp double-click-to-open, same association
+            # the other platforms register (packaging/faci3d.desktop,
+            # the .iss). An IngeTrazo .igz opens as a new unsaved project.
             'CFBundleDocumentTypes': [
                 {
-                    'CFBundleTypeName': 'Faci3D document',
-                    'CFBundleTypeExtensions': ['igz'],
+                    'CFBundleTypeName': 'Faci3D project',
+                    'CFBundleTypeExtensions': ['faci3d'],
                     'CFBundleTypeRole': 'Editor',
                     'LSHandlerRank': 'Owner',
+                },
+                {
+                    'CFBundleTypeName': 'IngeTrazo document',
+                    'CFBundleTypeExtensions': ['igz'],
+                    'CFBundleTypeRole': 'Viewer',
+                    'LSHandlerRank': 'Alternate',
                 },
                 {
                     'CFBundleTypeName': 'SKP document',

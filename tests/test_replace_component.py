@@ -137,14 +137,11 @@ def test_replace_keeps_what_belongs_to_the_copy():
     t.material = {"color": (1.0, 0.0, 0.0)}
     t.hidden = True
     uid = t.uid
-    mesas[0].ifc = {"class": "IfcFurniture", "name": "Mesa"}
     hist.execute(ReplaceComponentCommand([t], mesas[0]))
     assert t.layer == "Mobiliario"
     assert t.material == {"color": (1.0, 0.0, 0.0)}
     assert t.hidden is True
     assert t.uid == uid
-    assert t.ifc == {"class": "IfcFurniture", "name": "Mesa"}
-    assert t.ifc is not mesas[0].ifc                # not aliased
 
 
 def test_replace_all_instances_then_undo_and_redo():

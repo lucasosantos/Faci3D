@@ -48,7 +48,7 @@ def test_a_fresh_install_packs_the_left_column_and_keeps_the_top_order(
             _app.processEvents()
         left = _bars_in(win, Qt.LeftToolBarArea)
         names = [tb.objectName() for tb in left]
-        assert names == ["draw", "annotate", "walkthrough"]
+        assert names == ["draw", "annotate"]
         for above, below in zip(left, left[1:]):
             g, h = above.geometry(), below.geometry()
             assert h.y() == g.y() + g.height()            # no hole between

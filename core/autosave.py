@@ -2,12 +2,12 @@
 # Copyright (C) 2026 Marco Sumari Tellez and IngeTrazo contributors.
 """Auto-save recovery slots — the usual General ▸ Auto-save, our way.
 
-One ``.igz`` slot per document in the user data dir (NOT beside the
+One ``.faci3d`` slot per document in the user data dir (NOT beside the
 document: the project folder may live in a syncing drive — pCloud has
 truncated mid-write files there before — and recovery files are session
 state, not project files). The slot's name is the document's stem plus a
 hash of its absolute path, so two ``casa.igz`` in different folders never
-share a slot; a document with no path yet uses the ``untitled`` slot.
+share a slot (and two ``casa.faci3d`` neither); a document with no path yet uses the ``untitled`` slot.
 
 The invariant that makes recovery detection trivial: **a slot exists only
 between a change and the next clean save/close.** The main window clears it
@@ -33,10 +33,10 @@ def autosave_dir() -> Path:
 def slot_for(path: Path | None) -> Path:
     """The recovery slot for a document (``None`` = the unsaved document)."""
     if path is None:
-        return autosave_dir() / "untitled.igz"
+        return autosave_dir() / "untitled.faci3d"
     p = Path(path).absolute()
     digest = hashlib.sha1(str(p).encode("utf-8")).hexdigest()[:8]
-    return autosave_dir() / f"{p.stem}-{digest}.igz"
+    return autosave_dir() / f"{p.stem}-{digest}.faci3d"
 
 
 def write(scene, path: Path | None) -> Path:
@@ -78,13 +78,15 @@ def clear(path: Path | None) -> None:
     if not slot.is_file():
         return
     stamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
-    target = discarded_dir() / f"{slot.stem}-{stamp}.igz"
+    target = discarded_dir() / f"{slot.stem}-{stamp}{slot.suffix}"
     try:
         slot.replace(target)
     except OSError:
         slot.unlink(missing_ok=True)
         return
-    kept = sorted(discarded_dir().glob("*.igz"),
+    # (*.igz: copies retired before projects became .faci3d)
+    kept = sorted([*discarded_dir().glob("*.faci3d"),
+                   *discarded_dir().glob("*.igz")],
                   key=lambda p: p.stat().st_mtime, reverse=True)
     for old in kept[KEEP_DISCARDED:]:
         try:

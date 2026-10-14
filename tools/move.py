@@ -250,7 +250,6 @@ class MoveTool(Tool):
         self._positions: list[QVector3D] = []  # unique positions to translate
         self._verts: list = []                 # resolved vertex objects (identity)
         self._groups: list[Group] = []         # whole groups being moved
-        self._splanes: list = []               # section planes being moved
         self._images: list = []                # reference images being moved
         self._labels: list[TextLabel] = []     # leader texts whose label moves
         self._dims: dict = {}                  # dimension → "line" | "rigid"
@@ -357,18 +356,6 @@ class MoveTool(Tool):
         if self.start_point is None:
             groups, positions = self._gather(ctx)
             labels = gather_labels(ctx)
-            from core.section import SectionPlane
-            splanes = [p for p in viewport.scene.selection
-                       if isinstance(p, SectionPlane)]
-            if not splanes and not viewport.scene.selection:
-                # Move grabs a section plane directly by hovering
-                # its frame — no pre-selection needed. The cut follows live.
-                pick = getattr(viewport, "pick_section_plane", None)
-                sp = (pick(ctx.screen.x(), ctx.screen.y())
-                      if pick is not None else None)
-                if sp is not None:
-                    splanes = [sp]
-                    groups, positions = [], []
             if labels and not viewport.scene.selection:
                 # A click on the glyphs grabs just the text, never the
                 # geometry that happens to sit behind it.
@@ -382,8 +369,7 @@ class MoveTool(Tool):
                 # A click on a dimension's lines grabs the dimension, not
                 # the geometry behind it.
                 groups, positions, verts = [], [], []
-            if not (groups or positions or labels or splanes or images
-                    or dims):
+            if not (groups or positions or labels or images or dims):
                 return  # nothing under the cursor / selected to move
             self._last = None            # a new move ends the array window
             self.start_point = ctx.world
@@ -392,7 +378,6 @@ class MoveTool(Tool):
             self._positions = positions
             self._labels = labels
             self._dims = dims
-            self._splanes = splanes
             self._images = images
             # The grabbed positions resolved to vertex OBJECTS once: the live
             # preview then moves these identities directly, so dragging through
@@ -855,8 +840,6 @@ class MoveTool(Tool):
             lab.offset = lab.offset + step
         for dim, mode in self._dims.items():
             MoveDimensionsCommand.shift(dim, mode, step)
-        for sp in self._splanes:
-            sp.point = sp.point + step
         for im in self._images:
             im.origin = im.origin + step
         viewport.scene.version += 1
@@ -870,13 +853,11 @@ class MoveTool(Tool):
         if getattr(self, "_vp_preview", False):
             # Groups-only drag: the viewport draws the frozen scratch copy
             # at the offset — no geometry mutation, no version churn, no
-            # rebuilds. Labels/section planes ride along in Python (few).
+            # rebuilds. Labels ride along in Python (few).
             for lab in self._labels:
                 lab.offset = lab.offset + step
             for dim, mode in self._dims.items():
                 MoveDimensionsCommand.shift(dim, mode, step)
-            for sp in self._splanes:
-                sp.point = sp.point + step
             for im in self._images:
                 im.origin = im.origin + step
             self._preview_delta = target_delta
@@ -889,15 +870,13 @@ class MoveTool(Tool):
         """Undo the live deformation, returning geometry to its grab-time spot."""
         if getattr(self, "_vp_preview", False):
             # Viewport-side preview: no geometry was mutated — only the
-            # labels/section planes moved live. Put those back.
+            # labels moved live. Put those back.
             if self._preview_delta.length() >= 1e-12:
                 step = -self._preview_delta
                 for lab in self._labels:
                     lab.offset = lab.offset + step
                 for dim, mode in self._dims.items():
                     MoveDimensionsCommand.shift(dim, mode, step)
-                for sp in self._splanes:
-                    sp.point = sp.point + step
                 for im in self._images:
                     im.origin = im.origin + step
             self._preview_delta = QVector3D(0.0, 0.0, 0.0)
@@ -939,10 +918,6 @@ class MoveTool(Tool):
                 commands.append(MoveTextLabelsCommand(self._labels, delta))
             if self._dims:
                 commands.append(MoveDimensionsCommand(self._dims, delta))
-            if self._splanes:
-                from core.history import MoveSectionPlanesCommand
-                commands.append(
-                    MoveSectionPlanesCommand(self._splanes, delta))
             if self._images:
                 from core.history import MoveImagePlanesCommand
                 commands.append(
@@ -978,7 +953,6 @@ class MoveTool(Tool):
         self._groups = []
         self._labels = []
         self._dims = {}
-        self._splanes = []
         self._images = []
         self._preview_delta = QVector3D(0.0, 0.0, 0.0)
         self._sel_faces = []

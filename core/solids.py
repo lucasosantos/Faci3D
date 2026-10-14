@@ -52,6 +52,30 @@ class SolidError(Exception):
 
 # ---- What is a solid ---------------------------------------------------------
 
+def face_set_volume(faces):
+    """Volume enclosed by ``faces``, or ``None`` when the set is not
+    watertight by itself. Signed tetrahedron sum over the set's triangles;
+    closure = every edge of the set borders exactly two faces of the set."""
+    faces = list(faces)
+    if not faces:
+        return None
+    counts: dict = {}
+    for f in faces:
+        for lp in (f.loop, *f.hole_loops):
+            n = len(lp)
+            for i in range(n):
+                key = frozenset((id(lp[i]), id(lp[(i + 1) % n])))
+                counts[key] = counts.get(key, 0) + 1
+    if any(c != 2 for c in counts.values()):
+        return None
+    total = 0.0
+    for f in faces:
+        for t0, t1, t2 in f.triangulate():
+            total += QVector3D.dotProduct(
+                t0, QVector3D.crossProduct(t1, t2)) / 6.0
+    return abs(total)
+
+
 def solid_report(mesh) -> tuple[bool, float | None]:
     """``(is_solid, volume)`` for a mesh: every edge between exactly two
     faces, no stray edges, at least one face. Volume in m³ when solid."""
@@ -61,7 +85,6 @@ def solid_report(mesh) -> tuple[bool, float | None]:
         n = sum(1 for f in e.faces if not getattr(f, "interior", False))
         if n != 2:
             return False, None
-    from core.bim import face_set_volume
     vol = face_set_volume([f for f in mesh.faces
                            if not getattr(f, "interior", False)])
     if vol is None or vol <= 1e-12:

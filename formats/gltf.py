@@ -11,9 +11,7 @@ Windows 3D Viewer, Babylon Sandbox, three.js, most web viewers.
 
 glTF is **Y-up, right-handed, metres**; IngeTrazo is Z-up, so positions and
 normals are baked ``(x, y, z) → (x, z, −y)`` and standard viewers show the model
-upright. The scene's geographic anchor (for sun/shadow studies) rides along in
-``asset.extras`` — glTF has no standard geolocation field, so a viewer that
-doesn't know IngeTrazo simply ignores it, and IngeTrazo can read it back.
+upright.
 
 No external dependencies — the GLB container is written by hand with ``struct``.
 """
@@ -24,7 +22,7 @@ import struct
 from pathlib import Path
 
 from core.texture import is_image_bytes
-from .meshexport import collect_geometry, export_names, geolocation
+from .meshexport import collect_geometry, export_names
 
 _F32 = 5126          # accessor componentType FLOAT
 _U32 = 5125          # accessor componentType UNSIGNED_INT
@@ -364,10 +362,6 @@ def save_glb(scene, path, face_me=None, only=None) -> None:
 
     # ---- assemble the glTF JSON ---------------------------------------------
     extras: dict = {"generator": "IngeTrazo"}
-    geo = geolocation(scene)
-    if geo is not None:
-        extras["ingetrazo_geolocation"] = {"lat": geo[0], "lon": geo[1],
-                                           "alt": geo[2]}
 
     gltf: dict = {
         "asset": {"version": "2.0", "generator": "IngeTrazo", "extras": extras},

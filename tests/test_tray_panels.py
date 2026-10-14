@@ -38,41 +38,41 @@ def test_the_panels_menu_lists_every_tray_tab_extensions_included(win):
     titles = [a.text() for a in win._panels_menu.actions() if a.isCheckable()]
     assert titles == [d.windowTitle() for d in win._sidebar_docks()]
     names = {d.objectName() for d in win._sidebar_docks()}
-    assert {"tray_properties", "tray_bim", "tray_georef",
-            "extension_ai", "extension_render_blender"} <= names
+    assert {"tray_properties", "tray_project_browser",
+            "extension_ai"} <= names
 
 
 def test_hiding_a_tab_is_remembered_and_the_next_window_keeps_it_away(win):
     from views.main_window import MainWindow
-    bim = _dock(win, "tray_bim")
-    win.set_tray_shown(bim, False)
-    assert bim.isHidden()
-    assert "tray_bim" in win._hidden_tray_names(QSettings())
+    browser = _dock(win, "tray_project_browser")
+    win.set_tray_shown(browser, False)
+    assert browser.isHidden()
+    assert "tray_project_browser" in win._hidden_tray_names(QSettings())
     other = MainWindow()
     try:
-        assert _dock(other, "tray_bim").isHidden()
+        assert _dock(other, "tray_project_browser").isHidden()
         assert not _dock(other, "tray_properties").isHidden()
     finally:
         other._saved_version = other.viewport.scene.version
         other.close()
     win._show_all_trays()
-    assert not bim.isHidden()
-    assert "tray_bim" not in win._hidden_tray_names(QSettings())
+    assert not browser.isHidden()
+    assert "tray_project_browser" not in win._hidden_tray_names(QSettings())
 
 
 def test_the_menu_entry_hides_and_shows_its_tab(win):
     menu = win._panels_menu
     win._fill_panels_menu(menu)
-    render = _dock(win, "extension_render_blender")
-    act = next(a for a in menu.actions() if a.text() == render.windowTitle())
+    ai = _dock(win, "extension_ai")
+    act = next(a for a in menu.actions() if a.text() == ai.windowTitle())
     assert act.isChecked()
     act.trigger()
-    assert render.isHidden()
+    assert ai.isHidden()
     win._fill_panels_menu(menu)
-    act = next(a for a in menu.actions() if a.text() == render.windowTitle())
+    act = next(a for a in menu.actions() if a.text() == ai.windowTitle())
     assert not act.isChecked()
     act.trigger()
-    assert not render.isHidden()
+    assert not ai.isHidden()
 
 
 def test_asking_for_a_tab_unfolds_a_folded_sidebar(win):

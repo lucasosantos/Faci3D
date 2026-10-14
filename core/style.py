@@ -58,10 +58,6 @@ class Style:
     # historical constants, so old documents look identical.
     sky_color: tuple = (0.925, 0.935, 0.945)
     ground_color: tuple = (0.815, 0.820, 0.815)
-    # Section Fill: paint the cut-through areas of solids.
-    # Lives in the STYLE, with the other modeling settings.
-    section_fill: bool = True
-    section_fill_color: tuple = (0.35, 0.37, 0.41)
 
     def to_dict(self) -> dict:
         return {
@@ -78,8 +74,6 @@ class Style:
             "sky": self.sky,
             "sky_color": list(self.sky_color),
             "ground_color": list(self.ground_color),
-            "section_fill": self.section_fill,
-            "section_fill_color": list(self.section_fill_color),
         }
 
     @classmethod
@@ -101,9 +95,6 @@ class Style:
             sky=bool(raw.get("sky", d.sky)),
             sky_color=tuple(raw.get("sky_color", d.sky_color)),
             ground_color=tuple(raw.get("ground_color", d.ground_color)),
-            section_fill=bool(raw.get("section_fill", d.section_fill)),
-            section_fill_color=tuple(raw.get("section_fill_color",
-                                             d.section_fill_color)),
         )
 
     def copy(self) -> "Style":
@@ -136,12 +127,11 @@ def effective_back_color(style, scene=None) -> tuple:
     return DEFAULT_BACK_COLOR
 
 
-# The usual style collections, adapted: Default (working look),
-# Architectural (clean white presentation), and the classic face styles.
+# The usual style collections, adapted: Default (working look) and the
+# classic face styles.
 def style_by_name(name: str) -> Style | None:
     """A COPY of the style called ``name`` — a built-in preset first, then
-    the user's saved library (composer frames keep a ``"style:<name>"``
-    reference, so both must resolve here). ``None`` if unknown."""
+    the user's saved library. ``None`` if unknown."""
     for preset in BUILTIN_STYLES:
         if preset.name == name:
             return preset.copy()
@@ -153,7 +143,6 @@ def style_by_name(name: str) -> Style | None:
 
 BUILTIN_STYLES: list[Style] = [
     Style(name="Default"),
-    Style(name="Architectural", background=(1.0, 1.0, 1.0), sky=False),
     Style(name="Shaded", face_mode="shaded"),
     Style(name="Hidden line", face_mode="hidden_line",
           background=(1.0, 1.0, 1.0), sky=False),
@@ -168,9 +157,9 @@ BUILTIN_STYLES: list[Style] = [
 # ---- User style library ------------------------------------------------------
 # Saved styles live in QSettings ("styles/user", a JSON list) like the custom
 # basemap sources: small, named, survive across sessions until removed. A
-# document doesn't NEED the library — the .igz and saved views carry the full
-# style dict — the library is what "Save style…" in the panel feeds and what
-# lets a composer frame or another document reference the look by name.
+# document doesn't NEED the library — the .igz carries the full style dict —
+# the library is what "Save style…" in the panel feeds and what lets another
+# document reference the look by name.
 
 def builtin_names() -> set[str]:
     return {p.name for p in BUILTIN_STYLES}

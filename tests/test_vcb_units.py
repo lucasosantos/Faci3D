@@ -135,15 +135,3 @@ def test_a_length_spin_edits_decimal_feet_for_feet_and_inches():
     assert length_suffix("m") == " m"
 
 
-def test_sheet_cotas_take_units():
-    from core.composition import CotaItem, Composicion
-    c = CotaItem(x_mm=10.0, y_mm=10.0, dx_mm=38.1, scale_n=1.0, units="in-frac",
-                 decimals=2)                                    # 38.1 mm = 1.5"
-    assert c.auto_label() == '1 1/2"'
-    c.units = "ft-in"
-    assert c.auto_label() == "0'1.50\""
-    c.units = "m"
-    assert c.auto_label() == "0.04 m"
-    back = Composicion.from_dict({"cotas": [{"x_mm": 1.0, "y_mm": 2.0,
-                                             "dx_mm": 10.0, "decimals": 1}]})
-    assert back.cotas[0].units == "m"                          # old documents

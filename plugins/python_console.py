@@ -222,15 +222,13 @@ class PythonConsoleDialog(QDialog):
             "mesh            the ACTIVE mesh (the open group's, inside one)\n"
             "viewport        the 3D view;  window   the MainWindow\n"
             "selection       set of selected entities;  groups / layers\n"
-            "bim             core.bim — tag_faces(), collect_objects(), ...\n"
             "QVector3D, Mesh, Group, Vertex, Edge, Face   the CAD classes\n\n"
             "# count entities\n"
             "print(len(mesh.vertices), len(mesh.faces))\n\n"
-            "# draw a slab and tag it (undoable as ONE step)\n"
+            "# draw a face (undoable as ONE step)\n"
             "pts = [QVector3D(0,0,0), QVector3D(5,0,0),\n"
             "       QVector3D(5,4,0), QVector3D(0,4,0)]\n"
-            "f = mesh.add_face(pts)\n"
-            "bim.tag_faces([f], 'IfcSlab', 'Losa 1', bim.next_object_id(scene))\n\n"
+            "f = mesh.add_face(pts)\n\n"
             "# paint the selection red (floats 0-1, the Paint idiom)\n"
             "for face in [e for e in selection if hasattr(e, 'loop')]:\n"
             "    face.attrs['color'] = (0.8, 0.1, 0.1)\n",
@@ -242,7 +240,6 @@ class PythonConsoleDialog(QDialog):
         open when the console appeared (documents change under New/Open)."""
         from PySide6.QtGui import QVector3D
         from PySide6.QtWidgets import QApplication
-        from core import bim
         from core.group import Group
         from core.mesh import Edge, Face, Mesh, Vertex
         from core.scene import Scene
@@ -252,7 +249,7 @@ class PythonConsoleDialog(QDialog):
             app=QApplication.instance(), window=vp.window(), viewport=vp,
             scene=vp.scene, model=vp.scene, mesh=vp.scene.mesh,
             selection=vp.scene.selection, groups=vp.scene.groups,
-            layers=vp.scene.layers, bim=bim, console=self,
+            layers=vp.scene.layers, console=self,
             QVector3D=QVector3D, Mesh=Mesh, Group=Group, Scene=Scene,
             Vertex=Vertex, Edge=Edge, Face=Face)
 

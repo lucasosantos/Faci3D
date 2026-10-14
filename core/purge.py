@@ -68,8 +68,7 @@ def iter_meshes(scene):
 
 
 def _annotations(scene):
-    for coll in ("dimensions", "text_labels", "image_planes",
-                 "section_planes"):
+    for coll in ("dimensions", "text_labels", "image_planes"):
         yield from (getattr(scene, coll, None) or ())
 
 
@@ -89,23 +88,9 @@ def used_layers(scene) -> set[str]:
     return used
 
 
-def layers_held_by_scenes(scene) -> set[str]:
-    """Layer names a saved view switches off.
-
-    An empty layer a scene deliberately hides is not litter — it is part of
-    that scene's meaning, and modellers build plan/elevation scenes
-    around tags they are about to fill. The sweep leaves them alone and says
-    so, rather than quietly breaking a view.
-    """
-    held: set[str] = set()
-    for view in getattr(scene, "saved_views", None) or ():
-        held.update(getattr(view, "hidden_layers", None) or ())
-    return held
-
-
 def unused_layers(scene) -> list:
     """The :class:`core.layers.Layer` objects a purge would remove."""
-    keep = used_layers(scene) | layers_held_by_scenes(scene)
+    keep = used_layers(scene)
     return [ly for ly in getattr(scene, "layers", None) or ()
             if ly.name != DEFAULT_LAYER and ly.name not in keep]
 

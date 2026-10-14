@@ -4,7 +4,7 @@
 """Model Info plugin — model statistics in a dialog (Extensions menu).
 
 A read-only, tabbed breakdown of the open document: geometry counts,
-bounding box, materials in use, layers, and BIM objects. The numbers agree
+bounding box, materials in use and layers. The numbers agree
 with the rest of the application because they come from the same sources:
 
 - geometry reads ``scene.loose_mesh`` (NOT ``scene.mesh``, which is swapped
@@ -12,10 +12,6 @@ with the rest of the application because they come from the same sources:
 - materials mirror the Paint tray's idiom: ``attrs["color"]`` (floats 0–1)
   and ``attrs["texture"]`` on each face — IngeTrazo has no material
   registry to query;
-- BIM objects come from :func:`core.bim.collect_objects`, the same call
-  behind the BIM tray and the IFC export, so a six-face wall with one tag
-  is ONE ``IfcWall`` here too — with its area and (when the face set is
-  watertight) its volume;
 - lengths are formatted by the dimension style (unit + precision), so the
   dialog speaks the same units as the rest of the document.
 """
@@ -39,10 +35,9 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from core import bim
 from core.i18n import tr
 from tools.base import Tool
-from core.units import fmt_area, fmt_volume
+from core.units import fmt_area
 
 
 # ---------------------------------------------------------------------------
@@ -125,14 +120,6 @@ def _collect_stats(scene) -> dict:
         entry["faces"] += 1
         entry["area"] += f.area()
 
-    # --- BIM objects — the same call behind the BIM tray and IFC export ----
-    objects = [{"class": o["class"], "name": o["name"],
-                "area": o["area"], "volume": o["volume"]}
-               for o in bim.collect_objects(scene)]
-    by_class: dict[str, int] = {}
-    for o in objects:
-        by_class[o["class"]] = by_class.get(o["class"], 0) + 1
-
     return {
         "loose_verts": loose_verts, "loose_edges": loose_edges,
         "loose_faces": loose_faces,
@@ -150,13 +137,9 @@ def _collect_stats(scene) -> dict:
         "textures": list(textures.values()),
         "layers": [{"name": ly.name, "visible": ly.visible,
                     "locked": ly.locked} for ly in scene.layers],
-        "bim_objects": objects,
-        "bim_by_class": by_class,
         "dims_count": len(scene.dimensions),
         "text_count": len(scene.text_labels),
         "guides_count": len(scene.guides),
-        "saved_views_count": len(scene.saved_views),
-        "geo_paths_count": len(scene.geo_paths),
         "style": dict(scene.dimension_style),
     }
 
@@ -200,22 +183,12 @@ def _stats_to_text(stats: dict) -> str:
         lock = " 🔒" if ly["locked"] else ""
         lines.append(f"  [{vis}] {ly['name']}{lock}")
 
-    if s["bim_objects"]:
-        lines += ["", f"--- {tr('BIM objects')} ({len(s['bim_objects'])}) ---"]
-        for o in s["bim_objects"]:
-            vol = (fmt_volume(o['volume']) if o["volume"] is not None
-                   else "—")
-            lines.append(f"  {o['class']}  {o['name']}: "
-                         f"{fmt_area(o['area'])}, {vol}")
-
     lines += [
         "",
         "--- " + tr("Annotations") + " ---",
         f"{tr('Dimensions')}: {s['dims_count']}   "
         f"{tr('Text labels')}: {s['text_count']}   "
         f"{tr('Guides')}: {s['guides_count']}",
-        f"{tr('Saved views')}: {s['saved_views_count']}   "
-        f"{tr('Geo paths')}: {s['geo_paths_count']}",
     ]
     return "\n".join(lines)
 
@@ -279,22 +252,6 @@ class ModelInfoDialog(QDialog):
         ml.addWidget(self._layer_table, stretch=1)
         self._tabs.addTab(mat_tab, tr("Materials & Layers"))
 
-        # BIM tab
-        bim_tab = QWidget()
-        bl = QVBoxLayout(bim_tab)
-        self._bim_label = QLabel()
-        bl.addWidget(self._bim_label)
-        self._bim_table = _make_table(
-            [tr("IFC Class"), tr("Name"), tr("Area"), tr("Volume")])
-        bl.addWidget(self._bim_table, stretch=1)
-        self._no_bim_label = QLabel(tr(
-            "No BIM tags yet.\nSelect faces or a group and use the BIM "
-            "panel to assign an IFC class\n(IfcWall, IfcSlab, ...); tagged "
-            "objects export to .ifc with their quantities."))
-        self._no_bim_label.setAlignment(Qt.AlignCenter)
-        bl.addWidget(self._no_bim_label)
-        self._tabs.addTab(bim_tab, tr("BIM"))
-
         btn_row = QHBoxLayout()
         refresh_btn = QPushButton(tr("Refresh"))
         refresh_btn.clicked.connect(self._refresh)
@@ -312,7 +269,6 @@ class ModelInfoDialog(QDialog):
         self._stats = _collect_stats(self._viewport.scene)
         self._populate_geom()
         self._populate_materials()
-        self._populate_bim()
 
     def _populate_geom(self) -> None:
         s, style = self._stats, self._stats["style"]
@@ -339,8 +295,6 @@ class ModelInfoDialog(QDialog):
             (tr("Dimensions"), str(s["dims_count"])),
             (tr("Text labels"), str(s["text_count"])),
             (tr("Guides"), str(s["guides_count"])),
-            (tr("Saved views"), str(s["saved_views_count"])),
-            (tr("Geo paths"), str(s["geo_paths_count"])),
         ]
         table = self._geom_table
         table.setRowCount(len(rows))
@@ -399,26 +353,6 @@ class ModelInfoDialog(QDialog):
             lock.setTextAlignment(Qt.AlignCenter)
             self._layer_table.setItem(i, 2, lock)
         self._layer_table.resizeRowsToContents()
-
-    def _populate_bim(self) -> None:
-        objects = self._stats["bim_objects"]
-        by_class = self._stats["bim_by_class"]
-        summary = "   ".join(f"{c}: {n}" for c, n in sorted(by_class.items()))
-        self._bim_label.setText(
-            tr("BIM objects: {n}", n=len(objects))
-            + (f"   ({summary})" if summary else ""))
-        self._bim_table.setVisible(bool(objects))
-        self._no_bim_label.setVisible(not objects)
-        self._bim_table.setRowCount(len(objects))
-        for i, o in enumerate(objects):
-            self._bim_table.setItem(i, 0, QTableWidgetItem(o["class"]))
-            self._bim_table.setItem(i, 1, QTableWidgetItem(o["name"]))
-            self._bim_table.setItem(
-                i, 2, QTableWidgetItem(f"{fmt_area(o['area'])}"))
-            vol = (fmt_volume(o['volume']) if o["volume"] is not None
-                   else tr("(not watertight)"))
-            self._bim_table.setItem(i, 3, QTableWidgetItem(vol))
-        self._bim_table.resizeRowsToContents()
 
     # ---- Clipboard ---------------------------------------------------------
     def _copy_to_clipboard(self) -> None:

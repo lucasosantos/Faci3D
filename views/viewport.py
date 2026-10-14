@@ -129,7 +129,6 @@ from core.style import DEFAULT_BACK_COLOR, effective_back_color
 from core.materials import material_sig as _material_sig
 from core.snap import SnapResult, _AXIS_VECTORS
 from core.texture import face_uv_axes
-from core.triangulate import plane_axes
 from tools.base import Tool, ToolContext
 from tools.select import selection_mode
 from core.inference import InferenceEngine
@@ -151,16 +150,6 @@ class _HoverEvent:
     def modifiers(self):
         return self._mods
 
-
-def _active_cut(scene):
-    """The section plane actually CUTTING (cuts shown + one active), or
-    None. A module function so stub viewports in tests degrade gracefully;
-    picks and snaps filter by it — what the cut hides is not clickable nor
-    snappable."""
-    if not getattr(scene, "show_section_cuts", True):
-        return None
-    active = getattr(scene, "active_section", None)
-    return active() if callable(active) else None
 
 
 class _SnapEdge:
@@ -877,14 +866,8 @@ class Viewport(QOpenGLWidget):
     # Live measurement for the VCB box (e.g. "5.00 m", "3.00 × 2.00 m").
     measurementChanged = Signal(str)
     glReady = Signal(dict)          # vendor/renderer/version once the context is up
-    # A base-map tile finished downloading (Track G) — lets the 3D terrain
-    # rebuild its mosaic as imagery arrives.
-    tilesChanged = Signal()
-    # UTM coordinate under the cursor, for the status bar readout (Track G).
-    coordinateChanged = Signal(str)
-    # The camera's projection changed ("parallel" / "perspective" /
-    # "two_point"), whoever changed it — the View toolbar's quick buttons
-    # follow it.
+    # The camera's projection changed ("parallel" / "perspective"),
+    # whoever changed it — the View toolbar's quick buttons follow it.
     projectionChanged = Signal(str)
 
     # Soft warm white painted on faces with no material colour — like the matte
@@ -1095,8 +1078,6 @@ class Viewport(QOpenGLWidget):
         self._preview_faces_vbo = None
         self._preview_tex_vao = None
         self._preview_tex_vbo = None
-        self._section_vao = None
-        self._section_vbo = None
 
         # Faces hidden from the normal pass while a tool previews — Push/Pull
         # hides the flat inner face it's pushing in (a window/door) so the recess
@@ -1157,45 +1138,6 @@ class Viewport(QOpenGLWidget):
         # Numeric value buffer (VCB-style typed length).
         self._value_buffer = ""
 
-        # Base-map tiles (Track G, G1). The fetcher is created lazily (needs a
-        # running app); GL textures are cached per tile, keyed by (source, x,y,z).
-        self._tile_fetcher = None
-        self._tile_textures: dict = {}
-        # A paint must only draw.  In particular, creating Qt's native HTTPS
-        # backend while an OpenGL context is current crashed in ntdll on an
-        # AMD Windows driver (#327).  Missing tiles schedule one event-loop
-        # callback; that callback starts the network work after paintGL has
-        # returned and the context is no longer inside a driver callback.
-        self._tile_requests_scheduled = False
-        self._last_coordinate = ""      # so the label only repaints on change
-        self._tile_quad_vao = None
-        self._tile_quad_vbo = None
-        # Cached base-map tile geometry (built once per capture, not per frame).
-        self._tile_geom = None
-        # Per-frame GL-texture-creation budget (spreads big captures over frames).
-        self._tex_budget = 0
-        self._tex_deferred = False
-
-        # Georef path node being hovered ``(path, index)`` — for the drag handle
-        # highlight (Track G, GeoPath node editing).
-        self._hover_geo_node = None
-        # World point on the profiled route to mark (profile→plan link), or None.
-        self._route_marker = None
-
-        # 3D draped terrain (Track G, G2 full).
-        self._terrain_vao = None
-        self._terrain_vbo = None
-        self._terrain_count = 0
-        self._terrain_texture = None
-        # Photogrammetric survey (Track G, G6). One VBO for the whole mesh and
-        # one texture per ODM atlas; ``_photo_ranges`` says which slice of the
-        # VBO each atlas covers, so the draw is ~20 calls, not one per triangle.
-        self._photo_vao = None
-        self._photo_vbo = None
-        self._photo_count = 0
-        self._photo_textures = []
-        self._photo_ranges = []
-
     # ---- GL lifecycle -------------------------------------------------------
     def initializeGL(self) -> None:
         # initializeGL re-runs when Qt recreates the context — the widget
@@ -1252,34 +1194,15 @@ class Viewport(QOpenGLWidget):
         # Per-instance model matrix columns (P2 instanced components).
         self._loc_inst = [self._program.attributeLocation(f"a_inst{i}")
                           for i in range(4)]
-        self._loc_clip_plane = self._program.uniformLocation("u_clip_plane")
-        self._loc_clip_enable = self._program.uniformLocation("u_clip_enable")
-        # Sun shadows (core/sun.py): sampling uniforms on the main program,
-        # plus the tiny depth-only program the shadow map renders with.
+        # The shader's sun-shadow and section-clip paths stay off.
         self._loc_shadow_enable = self._program.uniformLocation(
             "u_shadow_enable")
-        self._loc_shadow_map = self._program.uniformLocation("u_shadow_map")
-        self._loc_light_vp = self._program.uniformLocation("u_light_vp")
-        self._loc_shadow_dark = self._program.uniformLocation("u_shadow_dark")
-        self._loc_shadow_bias = self._program.uniformLocation("u_shadow_bias")
-        self._loc_sun_dir = self._program.uniformLocation("u_sun_dir")
         self._loc_shadow_overlay = self._program.uniformLocation(
             "u_shadow_overlay")
+        self._loc_clip_enable = self._program.uniformLocation("u_clip_enable")
         self._loc_stipple = self._program.uniformLocation("u_stipple")
         self._loc_viewport_px = self._program.uniformLocation("u_viewport_px")
         self._loc_dash_px = self._program.uniformLocation("u_dash_px")
-        self._depth_program = self._compile_depth_program()
-        self._loc_d_mvp = self._depth_program.uniformLocation("u_mvp")
-        self._loc_d_clip_plane = self._depth_program.uniformLocation(
-            "u_clip_plane")
-        self._loc_d_clip_enable = self._depth_program.uniformLocation(
-            "u_clip_enable")
-        self._loc_d_use_tex = self._depth_program.uniformLocation(
-            "u_use_texture")
-        self._loc_d_tex = self._depth_program.uniformLocation("u_tex")
-        self._shadow_fbo = None
-        self._shadow_key = None
-        self._shadow_vp = None
 
         # Axes rebuilt per frame (dash spacing scales with zoom), so dynamic.
         self._axes_vao, self._axes_vbo = self._create_dynamic()
@@ -1291,7 +1214,6 @@ class Viewport(QOpenGLWidget):
         self._sky_vao, self._sky_vbo = self._create_dynamic()
         self._sky_grad_vao, self._sky_grad_vbo = self._create_dynamic_color()
         self._ground_vao, self._ground_vbo = self._create_dynamic()
-        self._shadow_bb_vao, self._shadow_bb_vbo = self._create_dynamic_uv()
         self._edges_vao, self._edges_vbo = self._create_dynamic()
         self._dback_vao, self._dback_vbo = self._create_dynamic()
         self._selected_vao, self._selected_vbo = self._create_dynamic()
@@ -1306,10 +1228,6 @@ class Viewport(QOpenGLWidget):
         self._rubber_vao, self._rubber_vbo = self._create_dynamic()
         self._preview_faces_vao, self._preview_faces_vbo = self._create_dynamic()
         self._preview_tex_vao, self._preview_tex_vbo = self._create_dynamic_uv()
-        self._section_vao, self._section_vbo = self._create_dynamic()
-        self._tile_quad_vao, self._tile_quad_vbo = self._create_dynamic_uv()
-        self._terrain_vao, self._terrain_vbo = self._create_dynamic_uv()
-        self._photo_vao, self._photo_vbo = self._create_dynamic_uv()
 
     def resizeGL(self, w: int, h: int) -> None:
         # Qt passes framebuffer-pixel sizes here (already scaled by DPR), so
@@ -1352,8 +1270,8 @@ class Viewport(QOpenGLWidget):
         """Render the current view at ``width_px`` wide (height follows the
         viewport's aspect) and return it as a ``QImage`` — the hi-res 2D
         export. Reuses the exact ``paintGL`` pipeline against a temporary
-        FBO, then paints the presentation overlays (dimensions, geo paths,
-        survey points, guides) on top with a scaled QPainter; interactive
+        FBO, then paints the presentation overlays (dimensions, guides) on
+        top with a scaled QPainter; interactive
         artifacts (snap marker, hover, rubber band) are naturally absent.
 
         The sheet composer passes an explicit ``height_px`` (its frames have
@@ -1397,14 +1315,7 @@ class Viewport(QOpenGLWidget):
             # thickening lines and text proportionally.
             painter.scale(width_px / lw, height_px / lh)
             if not annotations_only:
-                # A sheet frame wants the model's annotations (the usual
-                # convention for sheets: dimensions and texts) but never the guides or
-                # the section-plane frames.
                 self._draw_guides(painter)
-                self._draw_section_planes(painter)
-                self._draw_geo_surfaces(painter)
-                self._draw_geo_paths(painter)
-                self._draw_geo_points(painter)
             self._draw_dimensions(painter)
             self._draw_text_labels(painter)
             painter.end()
@@ -1464,17 +1375,6 @@ class Viewport(QOpenGLWidget):
         mode = style.face_mode
         self._frame_style = style
 
-        # Active section cut: ONE world-space plane; the kept
-        # side is where dot(n, p - origin) <= 0. Applies to model geometry
-        # only — sky, axes, terrain, previews and overlays stay uncut.
-        self._clip_vec = None
-        sp = (self.scene.active_section()
-              if getattr(self.scene, "show_section_cuts", True) else None)
-        if sp is not None:
-            n, o = sp.normal, sp.point
-            self._clip_vec = QVector4D(
-                -n.x(), -n.y(), -n.z(), QVector3D.dotProduct(n, o))
-
         self._gl.glClearDepthf(1.0)
         bg = style.background
         self._gl.glClearColor(bg[0], bg[1], bg[2], 1.0)
@@ -1519,27 +1419,10 @@ class Viewport(QOpenGLWidget):
 
         # Sky / ground backdrop with a horizon anchored to the camera pitch —
         # premium modeller feel. Fixed on zoom (it's the point at infinity),
-        # moves only on orbit. Skipped over the base map / terrain (which supply
-        # their own ground).
-        if (self.plano_style is None and style.sky
-                and not self._base_map_showing()
-                and not self._terrain_showing()
-                and not self._photo_showing()):
+        # moves only on orbit.
+        if self.plano_style is None and style.sky:
             self._draw_sky(mvp)
             self._program.setUniformValue(self._loc_mvp, mvp)
-
-        # Base-map tiles (Track G) — the ground image, drawn before the grid so
-        # the grid lines read on top of the imagery. Depth-write OFF: it's a
-        # backdrop, geometry always draws over it.
-        self._render_tiles()
-
-        # 3D draped terrain (Track G, G2 full) — real depth-tested relief that
-        # replaces the flat map when enabled.
-        self._render_terrain()
-
-        # Photogrammetric survey (Track G, G6) — the user's own flight, drawn
-        # after the DEM terrain so the real capture wins where both exist.
-        self._render_photo_mesh()
 
         # Imported reference images (a scanned plan, a facade photo). Last of
         # the reference layers and before any model geometry: they are what
@@ -1554,41 +1437,9 @@ class Viewport(QOpenGLWidget):
         self._sync_edges()
         _fmark("sync")
 
-        # Sun shadow map — AFTER the sync, so the consolidated VBOs hold
-        # THIS frame's geometry; cached across frames by geometry+sun (it is
-        # camera-independent: orbit and zoom reuse it). The pass borrows the
-        # FBO/program bindings; this block restores them and binds the map
-        # on texture unit 1 for the geometry passes to sample.
-        self._frame_shadow = (self._ensure_shadow_map()
-                              if mode in ("textures", "shaded",
-                                          "hidden_line", "monochrome")
-                              else None)
-        if self._frame_shadow is not None:
-            self._scene_fbo.bind()
-            self._gl.glViewport(0, 0, w, h)
-            self._program.bind()
-            self._gl.glActiveTexture(GL_TEXTURE1)
-            self._gl.glBindTexture(GL_TEXTURE_2D,
-                                   self._frame_shadow.texture())
-            self._gl.glActiveTexture(GL_TEXTURE0)
-            self._program.setUniformValue(self._loc_shadow_map, 1)
-            self._program.setUniformValue(self._loc_light_vp,
-                                          self._shadow_vp)
-            sh = getattr(self.scene, "shadows", None)
-            self._program.setUniformValue1f(
-                self._loc_shadow_dark,
-                float(getattr(sh, "darkness", 0.55)))
-            # Small constant margin on the receiver; the heavy lifting is
-            # the slope-scaled bias the CASTER writes (depth.frag) — a
-            # constant big enough to silence grazing faces peeled every
-            # shadow off its base instead.
-            self._program.setUniformValue1f(self._loc_shadow_bias, 0.0006)
-            sun = getattr(self, "_frame_sun", None) or (0.0, 0.0, 1.0)
-            self._program.setUniformValue(
-                self._loc_sun_dir, QVector3D(sun[0], sun[1], sun[2]))
         self._program.setUniformValue(self._loc_shadow_enable, 0)
         self._program.setUniformValue(self._loc_shadow_overlay, 0)
-        _fmark("shadowmap")
+        self._program.setUniformValue(self._loc_clip_enable, 0)
 
         # Frustum culling (P1): the consolidated VBOs carry per-chunk draw
         # spans; only spans whose chunk AABB touches the frustum are
@@ -1625,10 +1476,6 @@ class Viewport(QOpenGLWidget):
 
         # Faces — drawn before edges, with polygon offset so coincident
         # boundary edges sit cleanly on top instead of z-fighting.
-        self._set_section_clip(True)
-        if getattr(self, "_frame_shadow", None) is not None:
-            self._draw_shadow_ground(style)
-            self._program.setUniformValue(self._loc_shadow_enable, 1)
         if self._faces_count > 0 and mode != "wireframe":
             self._gl.glEnable(GL_POLYGON_OFFSET_FILL)
             self._gl.glPolygonOffset(1.0, 1.0)
@@ -1825,10 +1672,6 @@ class Viewport(QOpenGLWidget):
         # prototype's local VBOs with per-instance matrices — the
         # consolidated passes above excluded them in _sync_edges.
         self._draw_instanced_faces(mode, style)
-        # Shadows stop at the face passes: edges, overlays, previews and
-        # billboards stay unlit (v1 scope).
-        if getattr(self, "_frame_shadow", None) is not None:
-            self._program.setUniformValue(self._loc_shadow_enable, 0)
 
         # Back-side material overrides (faces painted DIFFERENTLY per side,
         # two-sided paint from .skp): drawn with front-face culling so they
@@ -1864,8 +1707,6 @@ class Viewport(QOpenGLWidget):
                 self._program.setUniformValue1f(self._loc_shade, 1.0)
                 self._program.setUniformValue(self._loc_use_tex, 0)
             self._gl.glDisable(GL_CULL_FACE)
-
-        self._draw_section_fill(mode, style)
 
         # Translucent material runs (.skp trans with useTrans): drawn
         # after everything opaque, blended, depth-tested but not depth-
@@ -1996,7 +1837,6 @@ class Viewport(QOpenGLWidget):
         # the persistent faces, depth-tested so it occludes geometry behind it
         # and reads as a real solid; its wireframe goes on top via the rubber
         # band below.
-        self._set_section_clip(False)
         self._draw_preview_faces()
         self._draw_groups_preview(mvp)
         self._draw_hidden_ghosts(mvp)
@@ -2089,7 +1929,6 @@ class Viewport(QOpenGLWidget):
                 self._gl.glDepthMask(GL_TRUE)
                 self._guides_vao.release()
 
-        self._set_section_clip(True)
         show_edges = style.edges or mode == "wireframe"
         ec = style.edge_color
         # Line weight for sheet renders: a GL line is one pixel whatever
@@ -2195,8 +2034,6 @@ class Viewport(QOpenGLWidget):
             self._hover_edges_vao.bind()
             self._gl.glDrawArrays(GL_LINES, 0, hover_count)
             self._hover_edges_vao.release()
-        self._set_section_clip(False)
-        self._draw_section_cut_edges()   # ON the plane — drawn unclipped
 
         # Rubber band preview. Loose drawing tools float it on top (depth test
         # off, so it never z-fights with coincident axes). Push/Pull's solid
@@ -2292,19 +2129,6 @@ class Viewport(QOpenGLWidget):
         )
         if not (ok_v and ok_f and prog.link()):
             raise RuntimeError("shader compile/link failed:\n" + prog.log())
-        return prog
-
-    def _compile_depth_program(self) -> QOpenGLShaderProgram:
-        prog = QOpenGLShaderProgram(self)
-        ok_v = prog.addShaderFromSourceFile(
-            QOpenGLShader.Vertex, str(SHADER_DIR / "depth.vert")
-        )
-        ok_f = prog.addShaderFromSourceFile(
-            QOpenGLShader.Fragment, str(SHADER_DIR / "depth.frag")
-        )
-        if not (ok_v and ok_f and prog.link()):
-            raise RuntimeError(
-                "depth shader compile/link failed:\n" + prog.log())
         return prog
 
     def _upload_static(self, data: array):
@@ -3084,7 +2908,7 @@ class Viewport(QOpenGLWidget):
         self._gl.glDisable(GL_POLYGON_OFFSET_FILL)
 
     def _draw_instanced_raw(self) -> None:
-        """Geometry-only instanced draw — the section-fill stencil pass."""
+        """Geometry-only instanced draw."""
         by_proto = getattr(self, "_frame_instanced", None)
         if not by_proto:
             return
@@ -3512,89 +3336,6 @@ class Viewport(QOpenGLWidget):
                 for dx in offs for dy in offs
                 if dx * dx + dy * dy <= r * r + 0.51]
 
-    # ---- Base-map tiles (Track G) -------------------------------------------
-    def _base_map_showing(self) -> bool:
-        """True when a georeferenced base map is currently visible."""
-        layer = getattr(self.scene, "tile_layer", None)
-        return (layer is not None and getattr(layer, "visible", False)
-                and getattr(self.scene, "georef", None) is not None)
-
-    def _ensure_tile_fetcher(self):
-        """Create the tile fetcher on first use (needs a running app)."""
-        if self._tile_fetcher is None:
-            from georef.tile_fetcher import TileFetcher
-            self._tile_fetcher = TileFetcher(parent=self)
-            self._tile_fetcher.tileReady.connect(self._on_tile_ready)
-        return self._tile_fetcher
-
-    def _on_tile_ready(self, source_id, x, y, z, image) -> None:
-        """A downloaded tile arrived: stash its image and schedule a repaint."""
-        layer = getattr(self.scene, "tile_layer", None)
-        if (layer is not None and layer.source.id == source_id
-                and z == layer.zoom):
-            layer.images[(x, y, z)] = image
-            self.tilesChanged.emit()
-            self.update()
-
-    def _disk_cached_tile(self, source, x, y, z):
-        """Tile ``(x, y, z)`` of ``source`` from the on-disk cache, or None.
-        The same cache the fetcher fills, read without the fetcher: safe
-        inside paintGL, where the fetcher's network manager must not be
-        created (#327)."""
-        if z < 0 or z > source.max_zoom:
-            return None
-        if self._tile_fetcher is not None:
-            cache = self._tile_fetcher.cache
-        else:
-            cache = getattr(self, "_tile_disk_cache", None)
-            if cache is None:
-                from georef.tiles import TileCache, default_cache_dir
-                cache = self._tile_disk_cache = TileCache(default_cache_dir())
-        data = cache.get(source.id, x, y, z)
-        if data is None:
-            return None
-        from PySide6.QtCore import QByteArray
-        from PySide6.QtGui import QImage
-        img = QImage()
-        return img if img.loadFromData(QByteArray(data)) else None
-
-    def _schedule_tile_requests(self) -> None:
-        """Start missing tile requests after the current GL paint returns."""
-        if self._tile_requests_scheduled:
-            return
-        self._tile_requests_scheduled = True
-        QTimer.singleShot(0, self._request_missing_tiles)
-
-    def _request_missing_tiles(self) -> None:
-        """Fetch the current layer's missing images outside ``paintGL``.
-
-        Cache hits are copied into the layer immediately and repaint once;
-        network misses are delivered later by :meth:`_on_tile_ready`.
-        Reading the current scene here also makes a callback queued just before
-        a source/location change harmless.
-        """
-        self._tile_requests_scheduled = False
-        layer = getattr(self.scene, "tile_layer", None)
-        datum = getattr(self.scene, "georef", None)
-        if layer is None or datum is None or not getattr(layer, "visible", False):
-            return
-        try:
-            tiles = layer.flat_tiles(datum)
-        except Exception:
-            return
-        fetcher = self._ensure_tile_fetcher()
-        cached = False
-        for x, y in tiles:
-            key = (x, y, layer.zoom)
-            if key in layer.images:
-                continue
-            image = fetcher.request(layer.source, x, y, layer.zoom)
-            if image is not None:
-                layer.images[key] = image
-                cached = True
-        if cached:
-            self.update()
-
     #: Per-document caches keyed by ``id()`` of the document's groups,
     #: meshes and placements — the render/pick chunks and what hangs off
     #: them. Nothing but the document boundary makes them all stale at once.
@@ -3650,8 +3391,7 @@ class Viewport(QOpenGLWidget):
 
         ``_get_texture`` uploads lazily and remembers forever, which is right
         WITHIN a document — but nothing ever emptied it, so a long session of
-        opening textured models only ever grew VRAM (the same class of leak
-        CLAUDE.md measured at 0.42 GB for one survey's tile atlases).
+        opening textured models only ever grew VRAM.
         File ▸ New / Open call this at the document boundary: the old
         document's pictures go back to the driver, and whatever the new one
         actually shows re-uploads on demand at first paint."""
@@ -3659,8 +3399,8 @@ class Viewport(QOpenGLWidget):
         cache = getattr(self, "_tex_cache", None)
         if not cache:
             return
-        # Same contract as reset_tiles: destroying GL textures needs the
-        # context current — this runs from menu handlers, not paintGL.
+        # Destroying GL textures needs the context current — this runs
+        # from menu handlers, not paintGL.
         self.makeCurrent()
         try:
             for tex in cache.values():
@@ -3678,7 +3418,7 @@ class Viewport(QOpenGLWidget):
                 "_pv_vcol_vbo", "_pv_tex_vao", "_pv_tex_vbo",
                 "_ghost_edges_vao", "_ghost_edges_vbo", "_ghost_vcol_vao",
                 "_ghost_vcol_vbo", "_ghost_tex_vao", "_ghost_tex_vbo",
-                "_depth_fbo", "_scene_fbo", "_shadow_fbo", "_depth_snap")
+                "_depth_fbo", "_scene_fbo", "_depth_snap")
 
     def _forget_context_objects(self) -> None:
         """Forget every lazily made GL object (see ``_LAZY_GL``) and the
@@ -3707,302 +3447,9 @@ class Viewport(QOpenGLWidget):
                     if tex is not None:
                         tex.destroy()
                 cache.clear()
-            tiles = getattr(self, "_tile_textures", None)
-            if tiles:
-                for tex in tiles.values():
-                    if tex is not None:
-                        tex.destroy()
-                tiles.clear()
-            terrain = getattr(self, "_terrain_texture", None)
-            if terrain is not None:
-                terrain.destroy()
-                self._terrain_texture = None
-            self._release_photo_textures_unsafe()
         finally:
             self.doneCurrent()
 
-    def reset_tiles(self) -> None:
-        """Drop cached GL textures + pending images (source/datum changed)."""
-        if self._tile_textures:
-            # Destroying GL textures needs the context current — this runs from
-            # the Tray, not paintGL.
-            self.makeCurrent()
-            try:
-                for tex in self._tile_textures.values():
-                    if tex is not None:
-                        tex.destroy()
-            finally:
-                self.doneCurrent()
-        self._tile_textures.clear()
-        self._tile_geom = None       # capture patches / datum may have changed
-        if self._tile_fetcher is not None:
-            self._tile_fetcher.cancel_all()
-        layer = getattr(self.scene, "tile_layer", None)
-        if layer is not None:
-            layer.images.clear()
-        self.update()
-
-    # Max NEW GL textures created per frame. Uploading hundreds at once (a big
-    # capture) overwhelms Mesa and reads back as garbage (black/green tears at
-    # the far edge); creating a few per frame spreads it — the map fills in over
-    # a second and repaints itself until done.
-    # P4: 6 uploads (each with mipmap generation, ~5-15 ms on the iGPU)
-    # stacked into one frame was the ~100 ms hitch while zooming over the
-    # base map. 2 per frame keeps every frame under the 33 ms gate; the
-    # deferred-repaint loop below spreads the rest across frames.
-    _TEX_PER_FRAME = 2
-
-    def _tile_texture(self, layer, x, y):
-        """GL texture for tile ``(x, y)`` of ``layer``, or ``None`` if not yet
-        available (a download is kicked off and the frame repaints on arrival)."""
-        z = layer.zoom
-        key = (layer.source.id, x, y, z)
-        if key in self._tile_textures:
-            return self._tile_textures[key]
-        img = layer.images.get((x, y, z))
-        if img is None:
-            # A tile already on disk is read now — a file, no network — so a
-            # sheet frame or an export, drawn once, still gets every cached
-            # tile. Only a DOWNLOAD waits: QtNetwork must not start (the
-            # fetcher builds its network manager on first use) inside
-            # paintGL. On Windows/AMD that crashed in ntdll while the GL
-            # driver callback was active (#327). The queued callback runs
-            # when this paint has returned.
-            img = self._disk_cached_tile(layer.source, x, y, z)
-            if img is None:
-                self._schedule_tile_requests()
-                return None
-            layer.images[(x, y, z)] = img
-        if self._tex_budget <= 0:
-            self._tex_deferred = True     # too many this frame — next frame
-            return None
-        self._tex_budget -= 1
-        tex = QOpenGLTexture(img)  # QImage is top-down; our UVs map north→v=0
-        tex.setWrapMode(QOpenGLTexture.ClampToEdge)
-        tex.setMinificationFilter(QOpenGLTexture.LinearMipMapLinear)
-        tex.setMagnificationFilter(QOpenGLTexture.Linear)
-        self._tile_textures[key] = tex
-        return tex
-
-    def _terrain_showing(self) -> bool:
-        t = getattr(self.scene, "terrain", None)
-        return t is not None and getattr(t, "visible", False)
-
-    def prefetch_tiles(self, source, tile_list, zoom) -> None:
-        """Request the given tiles so their images populate ``tile_layer.images``
-        (used to build the 3D terrain mosaic even when the flat map is hidden)."""
-        layer = getattr(self.scene, "tile_layer", None)
-        if layer is None:
-            return
-        fetcher = self._ensure_tile_fetcher()
-        for (x, y) in tile_list:
-            img = fetcher.request(source, x, y, zoom)
-            if img is not None:
-                layer.images[(x, y, zoom)] = img
-
-    def upload_terrain(self, terrain) -> None:
-        """Build the terrain VBO (pos+uv) and its mosaic texture from a
-        :class:`~georef.terrain.TerrainObject`."""
-        if terrain is None or not terrain.vertices or not terrain.triangles:
-            self._terrain_count = 0
-            return
-        self.makeCurrent()
-        try:
-            raw = array("f")
-            verts, uvs = terrain.vertices, terrain.uvs
-            for (i, j, k) in terrain.triangles:
-                for idx in (i, j, k):
-                    v = verts[idx]
-                    u, w = uvs[idx]
-                    raw.extend([v.x(), v.y(), v.z(), u, w])
-            data = raw.tobytes()
-            self._terrain_vbo.bind()
-            self._terrain_vbo.allocate(data, len(data))
-            self._terrain_vbo.release()
-            self._terrain_count = len(raw) // 5
-            if self._terrain_texture is not None:
-                self._terrain_texture.destroy()
-                self._terrain_texture = None
-            img = terrain.texture_image
-            if img is not None and not img.isNull():
-                self._terrain_texture = QOpenGLTexture(img)
-                self._terrain_texture.setWrapMode(QOpenGLTexture.ClampToEdge)
-                self._terrain_texture.setMinificationFilter(
-                    QOpenGLTexture.LinearMipMapLinear)
-                self._terrain_texture.setMagnificationFilter(QOpenGLTexture.Linear)
-        finally:
-            self.doneCurrent()
-        self.update()
-
-    def _render_terrain(self) -> None:
-        if not self._terrain_showing() or self._terrain_count == 0:
-            return
-        self._gl.glEnable(GL_POLYGON_OFFSET_FILL)
-        self._gl.glPolygonOffset(1.0, 1.0)
-        self._terrain_vao.bind()
-        if self._terrain_texture is not None:
-            self._program.setUniformValue(self._loc_use_tex, 1)
-            self._terrain_texture.bind(0)
-            self._gl.glDrawArrays(GL_TRIANGLES, 0, self._terrain_count)
-            self._terrain_texture.release(0)
-            self._program.setUniformValue(self._loc_use_tex, 0)
-        else:
-            self._set_color(0.55, 0.60, 0.52, 1.0)
-            self._gl.glDrawArrays(GL_TRIANGLES, 0, self._terrain_count)
-        self._terrain_vao.release()
-        self._gl.glDisable(GL_POLYGON_OFFSET_FILL)
-
-    # ---- Photogrammetric survey (Track G, G6) ------------------------------
-
-    def _photo_showing(self) -> bool:
-        m = getattr(self.scene, "photo_mesh", None)
-        if m is None or not getattr(m, "visible", False) or self._photo_count == 0:
-            return False
-        # Its own switch AND its layer, the way a Group works: an entity can be
-        # hidden individually or by the layer it carries.
-        return self.scene.entity_visible(m)
-
-    def max_texture_size(self) -> int:
-        """The driver's ``GL_MAX_TEXTURE_SIZE`` — the hard ceiling for an atlas.
-
-        Queried rather than assumed: ODM routinely emits 24576px sheets, which
-        no current GPU accepts (this machine's Radeon 780M reports 16384), and
-        an oversized upload fails outright instead of degrading.
-        """
-        if self._gl is None:
-            return 4096                      # conservative until GL is up
-        self.makeCurrent()
-        try:
-            value = self._gl.glGetIntegerv(GL_MAX_TEXTURE_SIZE)
-        finally:
-            self.doneCurrent()
-        try:
-            value = int(value[0] if hasattr(value, "__len__") else value)
-        except (TypeError, ValueError):
-            return 4096
-        return value if value > 0 else 4096
-
-    def upload_photo_mesh(self, mesh, images=None) -> None:
-        """Upload a :class:`~georef.photomesh.PhotoMesh` and its atlases.
-
-        ``images`` maps a material index → already-loaded ``QImage`` (the reader
-        is slow enough that the caller does it off the GUI thread); anything
-        missing simply draws untextured rather than blocking here.
-        """
-        if mesh is None or mesh.triangle_count == 0:
-            self.release_photo_textures()
-            self._photo_count = 0
-            self.update()
-            return
-
-        import numpy as np
-
-        self.makeCurrent()
-        try:
-            # Inside makeCurrent: destroying a QOpenGLTexture without a current
-            # context leaks it and prints "Texture has not been destroyed".
-            self._release_photo_textures_unsafe()
-            # Expand indexed triangles to the flat pos+uv layout the shared
-            # VAO expects. Vectorised: the terrain's per-vertex Python loop is
-            # fine for a 180x180 grid and hopeless for 362k triangles.
-            tri = mesh.triangles
-            pos = mesh.vertices[tri]                     # (M, 3, 3)
-            uv = mesh.uvs[tri]                           # (M, 3, 2)
-            data = np.concatenate([pos, uv], axis=2).astype(np.float32).tobytes()
-            self._photo_vbo.bind()
-            self._photo_vbo.allocate(data, len(data))
-            self._photo_vbo.release()
-            self._photo_count = int(tri.shape[0]) * 3
-
-            # Materials are contiguous triangle runs, so each becomes one
-            # glDrawArrays over its slice of the same buffer.
-            images = images or {}
-            for index, material in enumerate(mesh.materials):
-                texture = None
-                image = images.get(index)
-                if image is not None and not image.isNull():
-                    texture = QOpenGLTexture(image)
-                    texture.setWrapMode(QOpenGLTexture.ClampToEdge)
-                    texture.setMinificationFilter(QOpenGLTexture.LinearMipMapLinear)
-                    texture.setMagnificationFilter(QOpenGLTexture.Linear)
-                self._photo_textures.append(texture)
-                self._photo_ranges.append(
-                    (material.start * 3, material.count * 3, texture))
-        finally:
-            self.doneCurrent()
-        self.update()
-
-    def release_photo_textures(self) -> None:
-        """Drop the survey's atlases (closing a document, or importing another).
-
-        Half a gigabyte of VRAM is worth freeing eagerly rather than waiting for
-        Qt to notice at teardown — when there is no current context left and the
-        textures leak with a warning instead.
-        """
-        if not self._photo_textures:
-            self._photo_ranges = []
-            return
-        self.makeCurrent()
-        try:
-            self._release_photo_textures_unsafe()
-        finally:
-            self.doneCurrent()
-
-    def _release_photo_textures_unsafe(self) -> None:
-        """Destroy the atlases. The caller must hold a current GL context."""
-        for texture in self._photo_textures:
-            if texture is not None:
-                texture.destroy()
-        self._photo_textures = []
-        self._photo_ranges = []
-
-    def _render_photo_mesh(self) -> None:
-        if not self._photo_showing():
-            return
-        # Same polygon offset as the terrain: the survey is the ground, and
-        # traced lines drawn on it must win the depth fight.
-        self._gl.glEnable(GL_POLYGON_OFFSET_FILL)
-        self._gl.glPolygonOffset(1.0, 1.0)
-        self._photo_vao.bind()
-        for first, count, texture in self._photo_ranges:
-            if count <= 0:
-                continue
-            if texture is not None:
-                self._program.setUniformValue(self._loc_use_tex, 1)
-                texture.bind(0)
-                self._gl.glDrawArrays(GL_TRIANGLES, first, count)
-                texture.release(0)
-                self._program.setUniformValue(self._loc_use_tex, 0)
-            else:
-                # Untextured run (atlas missing or still loading): neutral clay
-                # so it reads as "there is geometry here", not as a hole.
-                self._set_color(0.62, 0.60, 0.56, 1.0)
-                self._gl.glDrawArrays(GL_TRIANGLES, first, count)
-        self._photo_vao.release()
-        self._gl.glDisable(GL_POLYGON_OFFSET_FILL)
-
-    def _ensure_tile_geometry(self, layer, datum):
-        """Build the base-map tile quad VBO **once** for the current capture
-        patches (not per frame), returning ``[(x, y, vert_start), ...]``. The
-        capture is static, so a strip of many tiles still draws fast — each
-        frame just binds textures and draws slices; no per-tile re-allocation."""
-        key = (id(datum), getattr(datum, "north", 0.0), tuple(layer.patches),
-               layer.zoom, layer.source.id)
-        cache = getattr(self, "_tile_geom", None)
-        if cache is not None and cache[0] == key:
-            return cache[1]
-        raw = array("f")
-        runs = []
-        for (x, y) in layer.flat_tiles(datum):
-            start = len(raw) // 5
-            for pos, (u, v) in layer.quad_local(datum, x, y):
-                raw.extend([pos.x(), pos.y(), pos.z(), u, v])
-            runs.append((x, y, start))
-        self._tile_quad_vbo.bind()
-        self._tile_quad_vbo.allocate(raw.tobytes(), len(raw) * 4 or 4)
-        self._tile_quad_vbo.release()
-        self._tile_geom = (key, runs)
-        return runs
 
     # Sky (top) and ground (bottom) backdrop colours — subtle two-tone.
     _SKY_RGB = (0.925, 0.935, 0.945)
@@ -4112,269 +3559,6 @@ class Viewport(QOpenGLWidget):
         self._gl.glEnable(GL_DEPTH_TEST)
         self._gl.glDepthMask(GL_TRUE)
 
-    # ---- Sun shadows (core/sun.py) ------------------------------------------
-    _SHADOW_MAP_SIZE = 2048
-    #: The .skp translucency rule: materials under 70 % opacity cast no
-    #: shadow — the sun passes through glass.
-    _SHADOW_OPACITY_MIN = 0.7
-
-    def _sun_dir_now(self):
-        """Unit vector toward the sun for the scene's shadow settings —
-        ``None`` when there is nothing to cast (shadows off, kill switch
-        ``INGETRAZO_NO_SHADOWS``, a sheet plan style, night, or a date that
-        does not exist in a hand-edited file)."""
-        import os
-        if os.environ.get("INGETRAZO_NO_SHADOWS"):
-            return None
-        if self.plano_style is not None:
-            return None
-        sh = getattr(self.scene, "shadows", None)
-        if sh is None or not getattr(sh, "enabled", False):
-            return None
-        import datetime as _dt
-        from core import sun
-        datum = getattr(self.scene, "georef", None)
-        lat = getattr(datum, "lat", None)
-        lon = getattr(datum, "lon", None)
-        if lat is None or lon is None:
-            lat, lon = sun.DEFAULT_LAT, sun.DEFAULT_LON
-        try:
-            when = sh.when_utc(lon, year=_dt.date.today().year)
-        except ValueError:
-            return None
-        d = sun.sun_direction(lat, lon, when)
-        if d is None or datum is None or not getattr(datum, "north", 0.0):
-            return d
-        # The sun comes in grid axes (east, north); the model's frame may be
-        # turned by the datum's north angle — a shadow must fall the same way
-        # on the site whichever way the axes were drawn.
-        x, y = datum.grid_to_local_xy(d[0], d[1])
-        return (x, y, d[2])
-
-    @staticmethod
-    def _light_vp(d, lo, hi):
-        """The sun's orthographic view-projection fitted around the model —
-        and around the z=0 ground patch that receives. Ortho keeps the
-        packed depth linear."""
-        cx = (lo.x() + hi.x()) / 2.0
-        cy = (lo.y() + hi.y()) / 2.0
-        loz = min(lo.z(), 0.0)
-        cz = (loz + hi.z()) / 2.0
-        # Half-diagonal of the dominant extent (≤ 0.87×max side), with
-        # margin so rims never clip against the map's edge.
-        r = max(hi.x() - lo.x(), hi.y() - lo.y(), hi.z() - loz, 2.0) * 0.87
-        r *= 1.25
-        center = QVector3D(cx, cy, cz)
-        eye = center + QVector3D(d[0], d[1], d[2]) * (r * 2.0)
-        up = (QVector3D(0.0, 0.0, 1.0) if abs(d[2]) < 0.95
-              else QVector3D(0.0, 1.0, 0.0))
-        view = QMatrix4x4()
-        view.lookAt(eye, center, up)
-        proj = QMatrix4x4()
-        # Eye sits 2r from center; everything lives within r of it.
-        proj.ortho(-r, r, -r, r, r * 0.5, r * 3.5)
-        return proj * view
-
-    def _ensure_shadow_map(self):
-        """Build or reuse the packed-depth shadow map. Camera-independent:
-        keyed by geometry version + sun + cut + bounds, so orbit and zoom
-        REUSE it — only an edit, the clock or the section rebuilds."""
-        d = self._sun_dir_now()
-        self._frame_sun = d
-        if d is None:
-            self._shadow_vp = None
-            return None
-        lo, hi = self.scene.bounds()
-        if lo is None:
-            self._shadow_vp = None
-            return None
-        clip = getattr(self, "_clip_vec", None)
-        key = (self.scene.version, id(self.scene.mesh),
-               getattr(self, "_preview_epoch", 0),
-               tuple(round(v, 4) for v in d),
-               None if clip is None else (round(clip.x(), 4),
-                                          round(clip.y(), 4),
-                                          round(clip.z(), 4),
-                                          round(clip.w(), 4)),
-               round(lo.x(), 2), round(lo.y(), 2), round(lo.z(), 2),
-               round(hi.x(), 2), round(hi.y(), 2), round(hi.z(), 2))
-        # The light matrix is a pure function of the sun and the bounds —
-        # all of them in the key — so deriving it every frame costs two
-        # matrix builds and keeps it in step with the map. It must NOT hang
-        # off the cache-hit branch: a pass with the sun OFF in between
-        # clears it while leaving the map and its key intact (a sheet
-        # exports plans without shadows beside a 3D with them, and the live
-        # viewport does the same on any Shadows off→on with no edit between)
-        # — the next hit then pushed None into the uniform and the render
-        # died with «setUniformValue(15, None)». Marco, 2026-09-17,
-        # exporting the sheets of Plaza Yanque to PDF.
-        vp = self._light_vp(d, lo, hi)
-        if self._shadow_fbo is not None and self._shadow_key == key:
-            self._shadow_vp = vp
-            return self._shadow_fbo
-        if self._shadow_fbo is None:
-            fmt = QOpenGLFramebufferObjectFormat()
-            fmt.setAttachment(QOpenGLFramebufferObject.CombinedDepthStencil)
-            self._shadow_fbo = QOpenGLFramebufferObject(
-                self._SHADOW_MAP_SIZE, self._SHADOW_MAP_SIZE, fmt)
-        self._render_shadow_map(vp)
-        self._shadow_key = key
-        self._shadow_vp = vp
-        return self._shadow_fbo
-
-    def _render_shadow_map(self, light_vp) -> None:
-        """Depth-from-the-sun pass: every caster — the consolidated face
-        VBOs plus ALL instanced components (no camera culling here: an
-        off-screen tree still throws its shadow into the frame) — drawn
-        with the depth program into the packed-depth FBO. The active
-        section cut applies, so severed geometry does not cast. The caller
-        restores the scene FBO/program bindings this pass borrows."""
-        size = self._SHADOW_MAP_SIZE
-        fbo = self._shadow_fbo
-        fbo.bind()
-        self._gl.glViewport(0, 0, size, size)
-        self._gl.glClearColor(1.0, 1.0, 1.0, 1.0)
-        self._gl.glClearDepthf(1.0)
-        self._gl.glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)
-        self._gl.glEnable(GL_DEPTH_TEST)
-        self._gl.glDepthFunc(GL_LEQUAL)
-        self._gl.glDepthMask(GL_TRUE)
-        self._gl.glDisable(GL_BLEND)
-        prog = self._depth_program
-        prog.bind()
-        prog.setUniformValue(self._loc_d_mvp, light_vp)
-        prog.setUniformValue(self._loc_d_use_tex, 0)
-        clip = getattr(self, "_clip_vec", None)
-        if clip is not None:
-            prog.setUniformValue(self._loc_d_clip_plane, clip)
-            prog.setUniformValue(self._loc_d_clip_enable, 1)
-            self._gl.glEnable(GL_CLIP_DISTANCE0)
-        else:
-            prog.setUniformValue(self._loc_d_clip_enable, 0)
-        # Identity on the instanced-matrix generic attributes for the
-        # non-instanced draws (same reset the main pass does per frame).
-        for i, row in enumerate(((1.0, 0.0, 0.0, 0.0), (0.0, 1.0, 0.0, 0.0),
-                                 (0.0, 0.0, 1.0, 0.0),
-                                 (0.0, 0.0, 0.0, 1.0))):
-            self._gl.glVertexAttrib4f(3 + i, *row)
-        if self._faces_count > 0 or self._tcol_runs:
-            self._faces_vao.bind()
-            if self._faces_count > 0:
-                self._gl.glDrawArrays(GL_TRIANGLES, 0, self._faces_count)
-            # The .skp translucency rule: under 70 % opacity a material
-            # casts NO shadow (glass lets the sun through); at or above it,
-            # it casts like a solid.
-            for a, _fc, start, count in self._tcol_runs:
-                if a >= self._SHADOW_OPACITY_MIN:
-                    self._gl.glDrawArrays(GL_TRIANGLES, start, count)
-            self._faces_vao.release()
-        if self._tex_runs or self._ttex_runs:
-            # Textured faces cast with their ALPHA CUTOUT: a chain-link
-            # fence throws its weave, a leaf card its silhouette (texture
-            # unavailable = solid fallback). Translucent runs follow the
-            # 70 % rule above.
-            self._tex_faces_vao.bind()
-            prog.setUniformValue(self._loc_d_tex, 0)
-
-            def _cast_run(path, start, count):
-                tex = self._get_texture(path)
-                if tex is not None:
-                    prog.setUniformValue(self._loc_d_use_tex, 1)
-                    tex.bind(0)
-                    self._gl.glDrawArrays(GL_TRIANGLES, start, count)
-                    tex.release(0)
-                else:
-                    prog.setUniformValue(self._loc_d_use_tex, 0)
-                    self._gl.glDrawArrays(GL_TRIANGLES, start, count)
-
-            for (path, _shade), start, count in self._tex_runs:
-                _cast_run(path, start, count)
-            for (path, _shade), a, _fc, start, count in self._ttex_runs:
-                if a >= self._SHADOW_OPACITY_MIN:
-                    _cast_run(path, start, count)
-            prog.setUniformValue(self._loc_d_use_tex, 0)
-            self._tex_faces_vao.release()
-        saved = getattr(self, "_frame_planes", None)
-        self._frame_planes = None      # gather WITHOUT camera culling
-        try:
-            by_proto = self._gather_instanced()
-        finally:
-            self._frame_planes = saved
-        extra = self.context().extraFunctions()
-        for mesh, paint, groups, _mirrored in by_proto.values():
-            entry = self._ensure_proto_draw(mesh, paint)
-            n = self._update_inst_matrices(entry, groups)
-            prog.bind()                # entry building binds the main program
-            if entry["vcol_count"]:
-                entry["vcol_vao"].bind()
-                extra.glDrawArraysInstanced(
-                    GL_TRIANGLES, 0, entry["vcol_count"], n)
-                entry["vcol_vao"].release()
-            if entry["tex_runs"]:
-                # Alpha-cutout casting for instances too — the hedge's
-                # leaves dapple instead of throwing solid slabs.
-                entry["tex_vao"].bind()
-                prog.setUniformValue(self._loc_d_tex, 0)
-                for (path, _shade), s0, cnt in entry["tex_runs"]:
-                    tex = self._get_texture(path)
-                    if tex is not None:
-                        prog.setUniformValue(self._loc_d_use_tex, 1)
-                        tex.bind(0)
-                        extra.glDrawArraysInstanced(GL_TRIANGLES, s0, cnt, n)
-                        tex.release(0)
-                    else:
-                        prog.setUniformValue(self._loc_d_use_tex, 0)
-                        extra.glDrawArraysInstanced(GL_TRIANGLES, s0, cnt, n)
-                prog.setUniformValue(self._loc_d_use_tex, 0)
-                entry["tex_vao"].release()
-        # Billboard people cast their SILHOUETTE, as a quad turned toward
-        # the sun — a camera-facing caster would swing its shadow while the
-        # camera orbits (face-me "shadows face sun"). Vector-art
-        # and mesh face-me stay non-casting (documented deferral).
-        sun = getattr(self, "_frame_sun", None)
-        bbs = [g for g in self._placements()
-               if getattr(g, "billboard", False) is True
-               and self.scene.entity_visible(g)]
-        if sun is not None and bbs:
-            face = QVector3D(sun[0], sun[1], 0.0)
-            data = array("f")
-            draws = []
-            uvs = [(0.0, 0.0), (1.0, 0.0), (1.0, 1.0), (0.0, 1.0)]
-            for g in bbs:
-                quad = self._billboard_quad(g, face_dir=face)
-                if quad is None or not quad[1]:
-                    continue
-                corners, path = quad
-                start = len(data) // 5
-                for idx in (0, 1, 2, 0, 2, 3):
-                    c = corners[idx]
-                    u, v = uvs[idx]
-                    data.extend([c.x(), c.y(), c.z(), u, v])
-                draws.append((path, start))
-            if draws:
-                raw = data.tobytes()
-                self._shadow_bb_vbo.bind()
-                self._shadow_bb_vbo.allocate(raw, len(raw))
-                self._shadow_bb_vbo.release()
-                prog.bind()
-                prog.setUniformValue(self._loc_d_use_tex, 1)
-                prog.setUniformValue(self._loc_d_tex, 0)
-                self._shadow_bb_vao.bind()
-                for path, start in draws:
-                    tex = self._get_texture(path)
-                    if tex is None:
-                        continue
-                    tex.bind(0)
-                    self._gl.glDrawArrays(GL_TRIANGLES, start, 6)
-                    tex.release(0)
-                self._shadow_bb_vao.release()
-                prog.setUniformValue(self._loc_d_use_tex, 0)
-        if clip is not None:
-            self._gl.glDisable(GL_CLIP_DISTANCE0)
-        prog.release()
-        fbo.release()
-        self._gl.glEnable(GL_BLEND)
-
     def set_print_bed(self, printer) -> None:
         """Show ``printer``'s bed and build volume (``None`` hides them)."""
         self.print_bed = printer
@@ -4416,76 +3600,6 @@ class Viewport(QOpenGLWidget):
             self._gl.glDrawArrays(prim, start, count)
         self._bed_vao.release()
         self._gl.glDepthMask(GL_TRUE)
-
-    def _draw_shadow_ground(self, style) -> None:
-        """The on-ground shadow catcher: a world plane just under z=0 that
-        draws ONLY the shadow — translucent black where the sun is blocked,
-        fully transparent where it is not, so the plane itself has no
-        visible colour or edges (on-ground shadows). Skipped
-        over the map, terrain and photo mesh, which bring their own ground;
-        depth writes OFF so below-ground geometry still draws over it and a
-        real floor AT z=0 never z-fights."""
-        if (self._base_map_showing() or self._terrain_showing()
-                or self._photo_showing()):
-            return
-        lo, hi = self.scene.bounds()
-        if lo is None:
-            return
-        cx = (lo.x() + hi.x()) / 2.0
-        cy = (lo.y() + hi.y()) / 2.0
-        r = max(hi.x() - lo.x(), hi.y() - lo.y(), 20.0) * 1.5
-        z = -0.005
-        x0, x1, y0, y1 = cx - r, cx + r, cy - r, cy + r
-        data = array("f", [x0, y0, z, x1, y0, z, x1, y1, z,
-                           x0, y0, z, x1, y1, z, x0, y1, z])
-        self._ground_vbo.bind()
-        self._ground_vbo.allocate(data.tobytes(), len(data) * 4)
-        self._ground_vbo.release()
-        self._program.setUniformValue(self._loc_shadow_enable, 1)
-        self._program.setUniformValue(self._loc_shadow_overlay, 1)
-        self._gl.glDepthMask(GL_FALSE)
-        self._ground_vao.bind()
-        self._gl.glDrawArrays(GL_TRIANGLES, 0, 6)
-        self._ground_vao.release()
-        self._gl.glDepthMask(GL_TRUE)
-        self._program.setUniformValue(self._loc_shadow_overlay, 0)
-
-    def _render_tiles(self) -> None:
-        if self._terrain_showing():
-            return  # the 3D terrain replaces the flat map
-        layer = getattr(self.scene, "tile_layer", None)
-        datum = getattr(self.scene, "georef", None)
-        if layer is None or datum is None or not getattr(layer, "visible", False):
-            return
-        try:
-            runs = self._ensure_tile_geometry(layer, datum)
-        except Exception:
-            return
-        if not runs:
-            return
-        # Budget new texture uploads this frame (see _tile_texture).
-        self._tex_budget = self._TEX_PER_FRAME
-        self._tex_deferred = False
-        self._program.setUniformValue(self._loc_use_tex, 1)
-        # A faded map (opacity < 1) blends over the background so the
-        # model and its lines read on top of the imagery.
-        opacity = max(0.0, min(1.0, float(getattr(layer, "opacity", 1.0))))
-        self._program.setUniformValue1f(self._loc_opacity, opacity)
-        self._gl.glDepthMask(GL_FALSE)
-        self._tile_quad_vao.bind()
-        for (x, y, start) in runs:
-            tex = self._tile_texture(layer, x, y)
-            if tex is None:
-                continue
-            tex.bind(0)
-            self._gl.glDrawArrays(GL_TRIANGLES, start, 6)
-            tex.release(0)
-        self._tile_quad_vao.release()
-        self._gl.glDepthMask(GL_TRUE)
-        self._program.setUniformValue1f(self._loc_opacity, 1.0)
-        self._program.setUniformValue(self._loc_use_tex, 0)
-        if self._tex_deferred:            # more tiles to upload — schedule a frame
-            self.update()
 
     # ---- Dynamic uploads ----------------------------------------------------
     def notify_scene_changed(self) -> None:
@@ -6387,7 +5501,6 @@ class Viewport(QOpenGLWidget):
 
         # The Scale tool's grip box (yellow box with green grips).
         self._draw_scale_box(painter)
-        self._draw_section_planes(painter)
         # Tool-owned overlay (the Flip planes; the future Axes gizmo): a tool
         # exposing ``draw_overlay(viewport, painter)`` paints after the
         # document annotations, before the edit-group frame.
@@ -6396,25 +5509,6 @@ class Viewport(QOpenGLWidget):
             hook(self, painter)
         # Extensions' overlays (``ExtensionApp.add_overlay``).
         self._draw_extension_overlays(painter)
-
-        # Terrain-surface fills (draped / flat) under the georef paths — Track G.
-        self._draw_geo_surfaces(painter)
-
-        # Traced georef paths (roads / boundaries) — Track G.
-        self._draw_geo_paths(painter)
-
-        # Imported survey points (GPS / total station) — Track G.
-        self._draw_geo_points(painter)
-
-        # Profile→plan marker: the route point at the station hovered in the
-        # profile panel (Track G).
-        if self._route_marker is not None:
-            q = self._world_to_pixel(self.drape(self._route_marker))
-            if q is not None:
-                painter.setBrush(QColor(243, 115, 41))
-                painter.setPen(QPen(QColor(255, 255, 255), 1.5))
-                painter.drawEllipse(QPointF(*q), 6, 6)
-                painter.setBrush(Qt.NoBrush)
 
         # Persistent dimension annotations
         self._draw_dimensions(painter)
@@ -6647,350 +5741,6 @@ class Viewport(QOpenGLWidget):
         from core.group import oriented_box_corners
         return oriented_box_corners(*self._group_obb(group))
 
-    # ---- Section planes ------------------------------------------------------
-    def _set_section_clip(self, on: bool) -> None:
-        """Enable/disable the active section cut around a model-geometry pass
-        (``gl_ClipDistance`` in basic.vert). No-op when no cut is active."""
-        if getattr(self, "_clip_vec", None) is None:
-            return
-        if on:
-            self._program.setUniformValue(self._loc_clip_plane, self._clip_vec)
-            self._program.setUniformValue(self._loc_clip_enable, 1)
-            self._gl.glEnable(GL_CLIP_DISTANCE0)
-        else:
-            self._program.setUniformValue(self._loc_clip_enable, 0)
-            self._gl.glDisable(GL_CLIP_DISTANCE0)
-
-    def _section_cut_active(self):
-        return _active_cut(self.scene)
-
-    def section_plane_frame(self, sp) -> list:
-        """Four world corners of the plane's drawn frame: the model's bounds
-        projected onto the plane, with a margin (the plane object is sized
-        to the model)."""
-        u, v = plane_axes(sp.normal)
-        lo, hi = self.scene.bounds()
-        if lo is None:
-            half_u = half_v = 1.5
-            cu = cv = 0.0
-        else:
-            corners = [QVector3D(x, y, z)
-                       for x in (lo.x(), hi.x())
-                       for y in (lo.y(), hi.y())
-                       for z in (lo.z(), hi.z())]
-            us = [QVector3D.dotProduct(c - sp.point, u) for c in corners]
-            vs = [QVector3D.dotProduct(c - sp.point, v) for c in corners]
-            cu, cv = (min(us) + max(us)) * 0.5, (min(vs) + max(vs)) * 0.5
-            half_u = (max(us) - min(us)) * 0.56 + 0.2
-            half_v = (max(vs) - min(vs)) * 0.56 + 0.2
-        c = sp.point + u * cu + v * cv
-        return [c - u * half_u - v * half_v, c + u * half_u - v * half_v,
-                c + u * half_u + v * half_v, c - u * half_u + v * half_v]
-
-    def _draw_section_planes(self, painter: QPainter) -> None:
-        """The section plane OBJECTS (frame + corner brackets + symbol):
-        orange when active, light grey when not, a solid heavier frame when
-        selected. Hidden by View ▸ Section Planes."""
-        planes = getattr(self.scene, "section_planes", None)
-        if not planes or not getattr(self.scene, "show_section_planes", True):
-            return
-        selection = self.scene.selection
-        for sp in planes:
-            if getattr(sp, "hidden", False):
-                continue                    # its frame is off; a cut stays
-            corners = self.section_plane_frame(sp)
-            px = []
-            ok = True
-            for i in range(4):
-                seg = self._clip_segment_front(corners[i],
-                                               corners[(i + 1) % 4])
-                if seg is None:
-                    ok = False
-                    break
-                a = self._world_to_pixel(seg[0])
-                b = self._world_to_pixel(seg[1])
-                if a is None or b is None:
-                    ok = False
-                    break
-                px.append((a, b))
-            if not ok:
-                continue
-            # Active or not, at a glance (@pacaeiro, #62, second round): the
-            # ACTIVE plane in orange, every other one light grey — the axis
-            # colours of 0.4.9 said which way a plane cut, which stops
-            # meaning anything once it is rotated. Orange is also the
-            # selection's colour, so a selected plane draws its frame SOLID
-            # and heavier instead of dashed.
-            selected = sp in selection
-            if sp.active:
-                col = QColor(243, 115, 41)
-                width = 2.0
-            else:
-                col = QColor(178, 182, 188)
-                width = 1.4
-            if selected:
-                width += 1.2
-            # The frame edges are drawn dashed.
-            pen = QPen(col, width, Qt.SolidLine if selected else Qt.DashLine)
-            painter.setPen(pen)
-            for a, b in px:
-                painter.drawLine(QPointF(*a), QPointF(*b))
-            # Corner brackets: short SOLID ticks into the frame.
-            painter.setPen(QPen(col, width))
-            for i in range(4):
-                c = self._world_to_pixel(corners[i])
-                n1 = self._world_to_pixel(corners[(i + 1) % 4])
-                n2 = self._world_to_pixel(corners[(i + 3) % 4])
-                if c is None or n1 is None or n2 is None:
-                    continue
-                for n_ in (n1, n2):
-                    dx, dy = n_[0] - c[0], n_[1] - c[1]
-                    ln = math.hypot(dx, dy) or 1.0
-                    k = min(14.0, ln * 0.18) / ln
-                    painter.drawLine(QPointF(c[0], c[1]),
-                                     QPointF(c[0] + dx * k, c[1] + dy * k))
-            # The section SYMBOL rides in a little balloon at EVERY
-            # corner of the frame.
-            symbol = (sp.symbol or "").strip()
-            if symbol:
-                painter.save()
-                font = painter.font()
-                font.setPointSizeF(8.5)
-                font.setBold(True)
-                painter.setFont(font)
-                r = 9.0
-                for i in range(4):
-                    c = self._world_to_pixel(corners[i])
-                    if c is None:
-                        continue
-                    centre = QPointF(c[0], c[1])
-                    painter.setBrush(QColor(255, 255, 255, 220))
-                    painter.setPen(QPen(col, width))
-                    painter.drawEllipse(centre, r, r)
-                    painter.setPen(QPen(col, 1))
-                    painter.drawText(
-                        QRectF(c[0] - r, c[1] - r, 2 * r, 2 * r),
-                        Qt.AlignCenter, symbol[:3])
-                painter.restore()
-
-    def pick_section_plane(self, screen_x: float, screen_y: float):
-        """The section plane whose frame is nearest the cursor within the
-        pick threshold, or ``None`` (Select / context menu / Eraser)."""
-        planes = getattr(self.scene, "section_planes", None)
-        if not planes or not getattr(self.scene, "show_section_planes", True):
-            return None
-        best, best_d = None, self.pick_threshold_px
-        for sp in planes:
-            if getattr(sp, "hidden", False):
-                continue
-            corners = self.section_plane_frame(sp)
-            for i in range(4):
-                seg = self._clip_segment_front(corners[i],
-                                               corners[(i + 1) % 4])
-                if seg is None:
-                    continue
-                a = self._world_to_pixel(seg[0])
-                b = self._world_to_pixel(seg[1])
-                if a is None or b is None:
-                    continue
-                d = _point_to_segment_distance_2d((screen_x, screen_y), a, b)
-                if d < best_d:
-                    best_d = d
-                    best = sp
-        return best
-
-    def _section_cut_segments(self):
-        """World-space cut segments: the active plane ∩ every visible model
-        triangle, vectorized over the pick index's (v0, e1, e2) arrays.
-        Cached per (scene version, plane pose)."""
-        sp = self.scene.active_section()
-        if sp is None:
-            return None
-        n, o = sp.normal, sp.point
-        key = (self.scene.version, round(n.x(), 9), round(n.y(), 9),
-               round(n.z(), 9), round(o.x(), 6), round(o.y(), 6),
-               round(o.z(), 6))
-        cached = getattr(self, "_section_cut_cache", None)
-        if cached is not None and cached[0] == key:
-            return cached[1]
-        idx = self._pick_flat(self._pick_index(near="all"))
-        from core.section import cut_chords
-        segs = None
-        if idx.tri_v0 is not None and len(idx.tri_v0):
-            segs = cut_chords(idx.tri_v0, idx.tri_e1, idx.tri_e2, n, o,
-                              idx.ent_vis[idx.tri_ent])
-        self._section_cut_cache = (key, segs)
-        return segs
-
-    def _section_fill_tris(self):
-        """The fill's triangles for the active cut, cached with the cut
-        segments they come from (same scene version, same plane pose)."""
-        import numpy as np
-        segs = self._section_cut_segments()
-        cached = getattr(self, "_section_fill_cache", None)
-        if cached is not None and (cached[0] is segs or (
-                segs is not None and cached[0] is not None
-                and cached[0].shape == segs.shape
-                and np.array_equal(cached[0], segs))):
-            # A selection click moves the scene version, not the cut.
-            self._section_fill_cache = (segs, cached[1])
-            return cached[1]
-        # Chaining the rings costs a fraction of a second on a model with
-        # thousands of cut solids — nothing once, too much per frame while
-        # a plane is dragged. A cut that keeps changing shows its lines
-        # live and its fill once it rests for a moment.
-        import time as _t
-        now = _t.monotonic()
-        last = getattr(self, "_section_fill_changed", 0.0)
-        self._section_fill_changed = now
-        if cached is not None and now - last < 0.15:
-            from PySide6.QtCore import QTimer
-            QTimer.singleShot(200, self.update)
-            return None
-        from core.section import fill_triangles
-        tris = fill_triangles(segs, self.scene.active_section().normal)
-        self._section_fill_cache = (segs, tris)
-        self._section_hatch_cache = {}
-        return tris
-
-    def _section_hatch(self, spacing: float, cross: bool):
-        """The hatch lines of the cut whose fill is cached, per (spacing,
-        cross) — computed once, while the cut stays the same."""
-        cached = getattr(self, "_section_fill_cache", None)
-        if cached is None:
-            return None
-        memo = getattr(self, "_section_hatch_cache", None)
-        if memo is None:
-            memo = self._section_hatch_cache = {}
-        key = (round(spacing, 9), bool(cross))
-        if key not in memo:
-            from core.section import hatch_segments
-            memo[key] = hatch_segments(
-                cached[0], self.scene.active_section().normal, spacing,
-                cross)
-        return memo[key]
-
-    def _draw_section_fill(self, mode, style) -> None:
-        """Section Fill: paint what the active cut slices out of solids —
-        and only that. The outlines come from the cut itself: the chords the
-        plane takes out of the visible triangles, chained into closed rings
-        with their holes (core.section.fill_triangles), the same rule the
-        sheet composer's poché follows. An open surface gives no closed
-        ring and stays unfilled.
-
-        It used to be a per-pixel trick — fill the plane wherever a BACK
-        face was the visible surface — which also painted faces seen from
-        behind that the plane does not cut at all (a lone face, a flipped
-        one, a 2D cutout): the fill showed where there was no section.
-        Lives in the style (style.section_fill)."""
-        if getattr(self, "_clip_vec", None) is None:
-            return
-        if mode in ("wireframe", "xray"):
-            return
-        sp = self.scene.active_section()
-        if sp is None:
-            return
-        # The plane's own fill over the style's (the style's switch is the
-        # master): solid, hatched, cross-hatched or none, in its colour.
-        from core.section import effective_fill
-        pattern, fc, spacing = effective_fill(sp, style)
-        if pattern == "none":
-            return
-        tris = self._section_fill_tris()
-        if tris is None or not len(tris):
-            return
-        # The fill lies IN the plane, which clips: unclipped while it
-        # draws, nudged a hair behind so the thick cut lines drawn later
-        # win the depth test.
-        self._set_section_clip(False)
-        raw = tris.reshape(-1).astype("float32").tobytes()
-        self._section_vbo.bind()
-        self._section_vbo.allocate(raw, len(raw))
-        self._section_vbo.release()
-        # A hatched cut sits on a pale ground of its own colour, so the
-        # inside of the solid never shows between the lines.
-        base = (fc if pattern == "solid"
-                else tuple(c + (1.0 - c) * 0.78 for c in fc[:3]))
-        self._gl.glEnable(GL_POLYGON_OFFSET_FILL)
-        self._gl.glPolygonOffset(2.0, 2.0)
-        self._set_color(base[0], base[1], base[2], 1.0)
-        self._program.setUniformValue(
-            self._loc_back_color, QVector4D(base[0], base[1], base[2], 1.0))
-        self._section_vao.bind()
-        self._gl.glDrawArrays(GL_TRIANGLES, 0, len(tris) * 3)
-        self._section_vao.release()
-        self._gl.glDisable(GL_POLYGON_OFFSET_FILL)
-        if pattern in ("hatch", "cross"):
-            lines = self._section_hatch(spacing, pattern == "cross")
-            if lines is not None and len(lines):
-                raw = lines.reshape(-1).astype("float32").tobytes()
-                self._section_vbo.bind()
-                self._section_vbo.allocate(raw, len(raw))
-                self._section_vbo.release()
-                self._set_color(fc[0], fc[1], fc[2], 1.0)
-                self._program.setUniformValue(
-                    self._loc_back_color,
-                    QVector4D(fc[0], fc[1], fc[2], 1.0))
-                self._section_vao.bind()
-                self._gl.glDrawArrays(GL_LINES, 0, len(lines) * 2)
-                self._section_vao.release()
-        self._set_section_clip(True)
-
-    def _draw_section_cut_edges(self) -> None:
-        """Thick section-cut lines: quads in the cut plane, sized
-        ~2.5 px, nudged toward the CLIPPED side so they never z-fight the
-        remaining geometry. Skipped when cuts are hidden."""
-        if getattr(self, "_clip_vec", None) is None:
-            return
-        segs = self._section_cut_segments()
-        if segs is None or not len(segs):
-            return
-        import numpy as np
-        sp = self.scene.active_section()
-        n = np.array([sp.normal.x(), sp.normal.y(), sp.normal.z()],
-                     dtype=np.float64)
-        a = segs[:, 0].astype(np.float64)
-        b = segs[:, 1].astype(np.float64)
-        t = b - a
-        ln = np.linalg.norm(t, axis=1)
-        keep = ln > 1e-9
-        if not keep.any():
-            return
-        a, b, t, ln = a[keep], b[keep], t[keep], ln[keep]
-        t /= ln[:, None]
-        side = np.cross(np.broadcast_to(n, t.shape), t)
-        # ~2.5 px of world width at each segment's distance from the eye.
-        eye = self.camera.eye()
-        eyev = np.array([eye.x(), eye.y(), eye.z()], dtype=np.float64)
-        mid = (a + b) * 0.5
-        dist = np.linalg.norm(mid - eyev, axis=1)
-        h = max(1.0, self.height())
-        fov = math.radians(getattr(self.camera, "fov_deg", 45.0))
-        wpp = np.maximum(dist * math.tan(fov * 0.5) * 2.0 / h, 1e-6)
-        w = (wpp * 1.25)[:, None]
-        lift = n * 0.6
-        off = side * w
-        q0 = a - off + lift * w
-        q1 = b - off + lift * w
-        q2 = b + off + lift * w
-        q3 = a + off + lift * w
-        tris = np.empty((len(a) * 2, 9), dtype=np.float32)
-        tris[0::2, 0:3] = q0
-        tris[0::2, 3:6] = q1
-        tris[0::2, 6:9] = q2
-        tris[1::2, 0:3] = q0
-        tris[1::2, 3:6] = q2
-        tris[1::2, 6:9] = q3
-        raw = tris.tobytes()
-        self._section_vbo.bind()
-        self._section_vbo.allocate(raw, len(raw))
-        self._section_vbo.release()
-        ec = self._frame_style.edge_color
-        self._set_color(ec[0], ec[1], ec[2], 1.0)
-        self._section_vao.bind()
-        self._gl.glDrawArrays(GL_TRIANGLES, 0, len(a) * 6)
-        self._section_vao.release()
-
     def _clip_segment_front(
         self, a: QVector3D, b: QVector3D
     ) -> Optional[tuple[QVector3D, QVector3D]]:
@@ -7158,222 +5908,6 @@ class Viewport(QOpenGLWidget):
             if q is not None:
                 painter.drawLine(QPointF(q[0] - 5, q[1]), QPointF(q[0] + 5, q[1]))
                 painter.drawLine(QPointF(q[0], q[1] - 5), QPointF(q[0], q[1] + 5))
-
-    def _draw_geo_surfaces(self, painter: QPainter) -> None:
-        """Draw terrain-surface fills as shaded, back-to-front triangles so the
-        relief reads in 3D (Track G). Semi-transparent, so the base map shows."""
-        paths = getattr(self.scene, "geo_paths", None)
-        if not paths:
-            return
-        eye = self.camera.eye()
-        light = QVector3D(0.3, 0.4, 0.85)
-        light = light.normalized()
-        for path in paths:
-            tris = getattr(path, "_surface_tris", None)
-            if not tris:
-                continue
-            flat = getattr(path, "surface", None) == "flat"
-            # Painter's algorithm: far triangles first.
-            ordered = sorted(
-                tris, key=lambda t: -((t[0] + t[1] + t[2]) - eye * 3.0).lengthSquared())
-            painter.setPen(Qt.NoPen)
-            for v0, v1, v2 in ordered:
-                p0 = self._world_to_pixel(v0)
-                p1 = self._world_to_pixel(v1)
-                p2 = self._world_to_pixel(v2)
-                if p0 is None or p1 is None or p2 is None:
-                    continue
-                # Flat shading from the face normal (relief legibility).
-                n = QVector3D.crossProduct(v1 - v0, v2 - v0)
-                if n.length() > 1e-9:
-                    n = n.normalized()
-                shade = 0.55 + 0.45 * max(0.0, abs(QVector3D.dotProduct(n, light)))
-                if flat:
-                    col = QColor(int(90 * shade), int(120 * shade), int(200 * shade), 150)
-                else:
-                    col = QColor(int(120 * shade), int(160 * shade), int(90 * shade), 150)
-                painter.setBrush(col)
-                painter.drawPolygon(QPolygonF([QPointF(*p0), QPointF(*p1), QPointF(*p2)]))
-            painter.setBrush(Qt.NoBrush)
-
-    def ground_height(self, x: float, y: float) -> float | None:
-        """Ground elevation at a plan position, or ``None`` where none is known.
-
-        One place to ask, so the survey-beats-DEM precedence lives here instead
-        of being re-decided by every caller (drape, the elevation readout, the
-        profile sampler chooser).
-        """
-        survey = getattr(self.scene, "photo_mesh", None)
-        if survey is not None and getattr(survey, "visible", False):
-            z = survey.height_at(x, y)
-            if z is not None:
-                return z
-        t = getattr(self.scene, "terrain", None)
-        if t is not None and getattr(t, "visible", False):
-            return t.height_at(x, y)
-        return None
-
-    def _emit_coordinate(self, ev) -> None:
-        """Publish the UTM coordinate under the cursor for the status bar.
-
-        Rides the coalesced hover rather than every mouse event: the readout is
-        for reading, and 16 updates a second is already more than an eye can
-        follow. Silent without a datum — local scene metres are not a
-        coordinate anybody can use.
-        """
-        datum = getattr(self.scene, "georef", None)
-        if datum is None:
-            if self._last_coordinate:
-                self._last_coordinate = ""
-                self.coordinateChanged.emit("")
-            return
-        p = ev.position().toPoint()
-        world = self._world_from_pixel(p.x(), p.y())
-        if world is None:
-            return
-        east, north, _ = datum.local_to_utm(world)
-        z = self.ground_elevation(world.x(), world.y())
-        # Compact on the bar — a decimetre is the pointer's own precision on
-        # a site plan, and the zone does not change under the mouse — and in
-        # full on hover (Marco, 23-09: the bar had no room for the hint).
-        text = f"E {east:.1f}  N {north:.1f}"
-        full = (f"E {east:,.2f}  N {north:,.2f}  "
-                f"{datum.zone}{datum.hemisphere}")
-        if z is not None:
-            text += f"  ·  {z:.1f} m"
-            full += f"  ·  {z:,.2f} m"
-        self._last_coordinate_full = full
-        if text != self._last_coordinate:
-            self._last_coordinate = text
-            self.coordinateChanged.emit(text)
-
-    def ground_elevation(self, x: float, y: float) -> float | None:
-        """Ground elevation as a REAL altitude, not a local offset.
-
-        ``ground_height`` answers in scene metres, which is what geometry
-        needs; this adds the datum's altitude back so what reaches the user is
-        the number they would read off a level — 1783.19, not 37.19. Anything
-        shown to a person goes through here.
-        """
-        z = self.ground_height(x, y)
-        if z is None:
-            return None
-        datum = getattr(self.scene, "georef", None)
-        return z + float(getattr(datum, "alt", 0.0) or 0.0)
-
-    def vertical_reference(self) -> str:
-        """Token naming what the scene's elevations are measured against, for
-        labelling. See :mod:`georef.photomesh` for the meanings."""
-        from georef.photomesh import VERTICAL_DEM, VERTICAL_LOCAL, VERTICAL_ODM
-        survey = getattr(self.scene, "photo_mesh", None)
-        if survey is not None and getattr(survey, "visible", False):
-            return getattr(survey, "vertical_reference", VERTICAL_ODM)
-        t = getattr(self.scene, "terrain", None)
-        if t is not None and getattr(t, "visible", False):
-            return VERTICAL_DEM
-        return VERTICAL_LOCAL
-
-    def has_ground_surface(self) -> bool:
-        """Whether anything is showing that a trace could be draped onto."""
-        for name in ("photo_mesh", "terrain"):
-            obj = getattr(self.scene, name, None)
-            if obj is not None and getattr(obj, "visible", False):
-                return True
-        return False
-
-    def drape(self, v: QVector3D) -> QVector3D:
-        """Lift a Z=0 georef point onto the ground (its relief height) when a
-        ground surface is showing, so routes/markers sit on it instead of
-        floating at the Z=0 reference plane. A no-op otherwise.
-
-        The **survey wins over the DEM terrain** where both are present: it is
-        the user's own flight at centimetres per pixel against 30 m global
-        cells, so a trace should follow what was actually captured.
-        """
-        z = self.ground_height(v.x(), v.y())
-        return QVector3D(v.x(), v.y(), z) if z is not None else v
-
-    def _draw_geo_points(self, painter: QPainter) -> None:
-        """Draw imported survey points (GPS / total station): a small cross
-        marker with the point's name — the surveyed skeleton the user traces
-        over. Reference-only; they carry their own elevation (no draping)."""
-        points = getattr(self.scene, "geo_points", None)
-        if not points:
-            return
-        ink = QColor(206, 66, 87)               # survey red — distinct from
-        painter.setPen(QPen(ink, 1.6))          # cyan paths / orange selection
-        font = QFont()
-        font.setPointSize(8)
-        painter.setFont(font)
-        for gp in points:
-            q = self._world_to_pixel(gp.position)
-            if q is None:
-                continue
-            x, y = q
-            painter.setPen(QPen(ink, 1.6))
-            painter.drawLine(QPointF(x - 5, y), QPointF(x + 5, y))
-            painter.drawLine(QPointF(x, y - 5), QPointF(x, y + 5))
-            if gp.name:
-                painter.setPen(QColor(120, 34, 48))
-                painter.drawText(QPointF(x + 7, y - 4), gp.name)
-
-    def _draw_geo_paths(self, painter: QPainter) -> None:
-        """Draw committed georef paths (roads / boundaries): a coloured polyline
-        with node handles. Selected paths and the hovered node highlight."""
-        paths = getattr(self.scene, "geo_paths", None)
-        if not paths:
-            return
-        base_ink = QColor(0, 190, 210)          # cyan — reads over terrain
-        sel_ink = QColor(243, 115, 41)          # selection orange
-        selection = self.scene.selection
-        hover_node = getattr(self, "_hover_geo_node", None)
-        for path in paths:
-            ink = sel_ink if path in selection else base_ink
-            pix = [self._world_to_pixel(self.drape(p)) for p in path.points]
-            painter.setPen(QPen(ink, 2.5))
-            for a, b in zip(pix, pix[1:]):
-                if a is not None and b is not None:
-                    painter.drawLine(QPointF(*a), QPointF(*b))
-            if path.closed and len(pix) > 2 and pix[0] and pix[-1]:
-                painter.drawLine(QPointF(*pix[-1]), QPointF(*pix[0]))
-            # Node handles.
-            painter.setBrush(ink)
-            painter.setPen(QPen(QColor(255, 255, 255), 1))
-            for i, q in enumerate(pix):
-                if q is None:
-                    continue
-                r = 5.0 if (hover_node == (path, i)) else 3.5
-                painter.drawEllipse(QPointF(*q), r, r)
-            painter.setBrush(Qt.NoBrush)
-            # Area + perimeter label at the centroid of a selected polygon.
-            if path in selection and path.closed and len(path.points) >= 3:
-                self._draw_geo_path_label(painter, path)
-
-    def _draw_geo_path_label(self, painter: QPainter, path) -> None:
-        n = len(path.points)
-        cx = sum(p.x() for p in path.points) / n
-        cy = sum(p.y() for p in path.points) / n
-        cz = sum(p.z() for p in path.points) / n
-        q = self._world_to_pixel(self.drape(QVector3D(cx, cy, cz)))
-        if q is None:
-            return
-        area = path.area()
-        text = f"{tr('Area')}: {area:.1f} m²  ({area / 10000:.3f} ha)\n" \
-               f"{tr('Perimeter')}: {_fmt_len(path.perimeter())}"
-        font = QFont()
-        font.setPointSize(9)
-        font.setBold(True)
-        painter.setFont(font)
-        fm = painter.fontMetrics()
-        lines = text.split("\n")
-        tw = max(fm.horizontalAdvance(ln) for ln in lines)
-        th = fm.height() * len(lines)
-        x, y = q[0] - tw / 2, q[1] - th / 2
-        painter.fillRect(int(x) - 5, int(y) - 3, tw + 10, th + 6,
-                         QColor(20, 24, 30, 190))
-        painter.setPen(QColor(255, 255, 255))
-        for i, ln in enumerate(lines):
-            painter.drawText(QPointF(x, y + fm.ascent() + i * fm.height()), ln)
 
     @staticmethod
     def _text_block_x(p_pos, p_anchor, block_w: float) -> float:
@@ -9874,21 +8408,6 @@ class Viewport(QOpenGLWidget):
         if cached is not None and cached[0] == key:
             return cached[1]
         face_t = self._ray_hits(idx, origin, direction, idx.ent_sel)
-        sp = _active_cut(self.scene)
-        if sp is not None and face_t is not None:
-            # Hits beyond the active cut are on clipped-away geometry.
-            import numpy as np
-            finite = np.isfinite(face_t)
-            if finite.any():
-                o = np.array([origin.x(), origin.y(), origin.z()])
-                d = np.array([direction.x(), direction.y(), direction.z()])
-                n = np.array([sp.normal.x(), sp.normal.y(), sp.normal.z()])
-                c = float(n @ [sp.point.x(), sp.point.y(), sp.point.z()])
-                pts = o + d * face_t[finite, None]
-                hidden = (pts @ n - c) > 1e-6
-                vals = face_t[finite]
-                vals[hidden] = np.inf
-                face_t[finite] = vals
         self._hover_hits_cache = (key, face_t)
         return face_t
 
@@ -9935,13 +8454,6 @@ class Viewport(QOpenGLWidget):
         if (visible_only and soft is not None
                 and not getattr(self.scene, "show_hidden_geometry", False)):
             ok &= ~soft
-        sp = _active_cut(self.scene)
-        if sp is not None:
-            n = np.array([sp.normal.x(), sp.normal.y(), sp.normal.z()])
-            c = float(n @ [sp.point.x(), sp.point.y(), sp.point.z()])
-            da = idx.edge_a @ n - c
-            db = idx.edge_b @ n - c
-            ok &= ~((da > 1e-6) & (db > 1e-6))
         if not ok.any():
             return None
         dx, dy = bx - ax, by - ay
@@ -10043,25 +8555,6 @@ class Viewport(QOpenGLWidget):
                 best_d = d
                 best = lab
         return None if rect_only else best
-
-    def pick_geopath(self, screen_x: float, screen_y: float):
-        """Return the georef path whose polyline is closest to the cursor within
-        the pick threshold, or ``None`` (Track G)."""
-        paths = getattr(self.scene, "geo_paths", None)
-        if not paths:
-            return None
-        best, best_d = None, self.pick_threshold_px
-        for path in paths:
-            for a, b in path.segments():
-                pa = self._world_to_pixel(self.drape(a))
-                pb = self._world_to_pixel(self.drape(b))
-                if pa is None or pb is None:
-                    continue
-                d = _point_to_segment_distance_2d((screen_x, screen_y), pa, pb)
-                if d < best_d:
-                    best_d = d
-                    best = path
-        return best
 
     @classmethod
     def _tool_busy_for_delete(cls, tool) -> bool:
@@ -10495,22 +8988,9 @@ class Viewport(QOpenGLWidget):
             if pc is not None and (hint is None or hint(ref, pc) > 0.0):
                 near.append(_SnapEdge(QVector3D(ref[0]), QVector3D(ref[0]),
                                       center=True))
-        sp = _active_cut(self.scene)
-        if sp is not None:
-            # What the cut hides must not attract snaps: drop
-            # edges whose BOTH endpoints are on the hidden side.
-            def _kept(e):
-                return not (sp.side(e.a) > 1e-6 and sp.side(e.b) > 1e-6)
-            near = [e for e in near if _kept(e)]
-        # Survey points snap as degenerate pseudo-edges: the endpoint snap
-        # lands EXACTLY on the surveyed coordinate (the municipal flow's whole
-        # point); direction-based inferences skip zero-length edges safely.
-        for gp in getattr(self.scene, "geo_points", None) or []:
-            near.append(_SnapEdge(QVector3D(gp.position),
-                                  QVector3D(gp.position)))
         big = (px is not None
                and len(self.scene.edges) > _LOOSE_SNAP_CAP)
-        if not lines and not near and sp is None and not big and excl is None:
+        if not lines and not near and not big and excl is None:
             return self.scene
         if big:
             loose = self._nearby_loose_edges(px, py)
@@ -10519,8 +8999,6 @@ class Viewport(QOpenGLWidget):
         loose = [e for e in loose if not getattr(e, "hidden", False)]
         if excl is not None and excl[0]:
             loose = [e for e in loose if id(e) not in excl[0]]
-        if sp is not None:
-            loose = [e for e in loose if _kept(e)]
         from types import SimpleNamespace
         return SimpleNamespace(edges=loose + lines + near)
 
@@ -10936,87 +9414,6 @@ class Viewport(QOpenGLWidget):
                 return vertex
         return None
 
-    def hlr_geometry(self):
-        """World-space geometry for the hidden-line pass (core.hlr) as
-        arrays, straight from the caches the viewport already keeps: the
-        pick index's triangles, every placement chunk's hard edges and soft
-        edges with their two face normals, plus the loose mesh's edges.
-        ``collect_geometry``'s per-face Python walk took 5 s on the fountain
-        (106k triangles) — and the composer paid it on every "Update view"
-        and on every frame added; this is tens of milliseconds.
-
-        Returns ``(tris (T,3,3), hard (E,2,3), soft (S,2,3), soft_n
-        (S,2,3))``; ``soft_n[:, 1]`` is NaN where a soft edge bounds an
-        open surface (no second face)."""
-        import numpy as np
-        scene = self.scene
-        idx = self._pick_flat(self._pick_index(near="all"))
-        if getattr(idx, "tri_v0", None) is not None and len(idx.tri_v0):
-            keep = idx.ent_vis[idx.tri_ent]
-            v0 = idx.tri_v0[keep]
-            tris = np.stack([v0, v0 + idx.tri_e1[keep],
-                             v0 + idx.tri_e2[keep]], axis=1)
-            tris = tris.astype(np.float64)
-        else:
-            tris = np.empty((0, 3, 3))
-        hard_parts: list = []
-        if getattr(idx, "gedge_a", None) is not None and len(idx.gedge_a):
-            gvis = np.array([scene.entity_visible(g)
-                             and not getattr(g, "billboard", False)
-                             for g in idx.gedge_groups], dtype=bool)
-            m = (gvis[idx.gedge_gi] if len(gvis)
-                 else np.zeros(len(idx.gedge_a), dtype=bool))
-            hard_parts.append(np.stack([idx.gedge_a[m], idx.gedge_b[m]],
-                                       axis=1).astype(np.float64))
-        soft_parts: list = []
-        n_parts: list = []
-        nan3 = (float("nan"),) * 3
-        lh: list = []
-        ls: list = []
-        ln: list = []
-        for e in scene.loose_mesh.edges:
-            if getattr(e, "hidden", False) or not scene.entity_visible(e):
-                continue
-            p0 = (e.v0.position.x(), e.v0.position.y(), e.v0.position.z())
-            p1 = (e.v1.position.x(), e.v1.position.y(), e.v1.position.z())
-            if getattr(e, "soft", False):
-                fs = [f for f in e.faces if scene.entity_visible(f)]
-                if not fs:
-                    continue
-                na = fs[0].normal()
-                nb = fs[1].normal() if len(fs) > 1 else None
-                ls.append((p0, p1))
-                ln.append(((na.x(), na.y(), na.z()),
-                           nan3 if nb is None else (nb.x(), nb.y(), nb.z())))
-            else:
-                lh.append((p0, p1))
-        if lh:
-            hard_parts.append(np.asarray(lh, dtype=np.float64))
-        if ls:
-            soft_parts.append(np.asarray(ls, dtype=np.float64))
-            n_parts.append(np.asarray(ln, dtype=np.float64))
-        for g in self._placements():
-            if (getattr(g, "billboard", False)
-                    or not scene.entity_visible(g)):
-                continue
-            ch = self._group_chunk(g)
-            sp = ch.get("soft_pts")
-            if sp is None or not len(sp):
-                continue
-            soft_parts.append(
-                np.asarray(sp, dtype=np.float64).reshape(-1, 2, 3))
-            n1 = np.where(np.asarray(ch["soft_single"])[:, None], np.nan,
-                          np.asarray(ch["soft_n1"], dtype=np.float64))
-            n_parts.append(np.stack(
-                [np.asarray(ch["soft_n0"], dtype=np.float64), n1], axis=1))
-        hard = (np.concatenate(hard_parts) if hard_parts
-                else np.empty((0, 2, 3)))
-        soft = (np.concatenate(soft_parts) if soft_parts
-                else np.empty((0, 2, 3)))
-        soft_n = (np.concatenate(n_parts) if n_parts
-                  else np.empty((0, 2, 3)))
-        return tris, hard, soft, soft_n
-
     def _effective_style(self):
         """The display style this frame draws with (Styles): the
         composer's ``plano_style`` override maps onto the same face modes,
@@ -11134,16 +9531,7 @@ class Viewport(QOpenGLWidget):
         X-ray and wireframe show everything, so nothing hides a snap there
         (the usual trick: switch to X-ray to dimension the floor of a pool through
         its water). Hidden-line and shaded keep the visible-only rule.
-
-        The active section cut is checked first, in every style: what it
-        cuts away is gone, not behind something. Dropping only the edges
-        with BOTH ends on the hidden side (``_snap_scene``) left the edge
-        that crosses the cut — a wall's vertical, cut halfway up — and its
-        hidden end and stretch still snapped (#384).
         """
-        sp = _active_cut(self.scene)
-        if sp is not None and sp.side(world) > 1e-6:
-            return True
         if self._effective_style().face_mode in ("xray", "wireframe"):
             return False
         idx = self._pick_index()
@@ -11156,30 +9544,12 @@ class Viewport(QOpenGLWidget):
         if dist < 1e-9:
             return False
         d = delta / dist
-        sp = _active_cut(self.scene)
-        if sp is None:
-            # Nothing to sort out per face: the single nearest hit decides,
-            # and asking for it skips allocating a per-face array on every
-            # query (this fires dozens of times a frame).
-            nearest = self._ray_hits(idx, origin, d, idx.ent_vis,
-                                     reduce_global=True)
-            return nearest is not None and nearest < dist - 1e-3
-        face_t = self._ray_hits(idx, origin, d, idx.ent_vis)
-        if face_t is None:
-            return False
-        import numpy as np
-        hit = np.isfinite(face_t) & (face_t < dist - 1e-3)
-        if not hit.any():
-            return False
-        # An active cut removes what it hides, so a hit on the clipped-away
-        # side is not an occluder. A ray meets a planar face at most once, so
-        # the per-face nearest hit IS the hit — testing it is exact.
-        eye = np.array([origin.x(), origin.y(), origin.z()])
-        dv = np.array([d.x(), d.y(), d.z()])
-        n = np.array([sp.normal.x(), sp.normal.y(), sp.normal.z()])
-        c = float(n @ [sp.point.x(), sp.point.y(), sp.point.z()])
-        pts = eye + dv * face_t[hit][:, None]
-        return bool(((pts @ n - c) <= 1e-6).any())
+        # The single nearest hit decides, and asking for it skips
+        # allocating a per-face array on every query (this fires dozens of
+        # times a frame).
+        nearest = self._ray_hits(idx, origin, d, idx.ent_vis,
+                                 reduce_global=True)
+        return nearest is not None and nearest < dist - 1e-3
 
     #: Cap on rays × triangles in one NumPy block of ``_occluded_many``
     #: (×3 float64 per array: ~50 MB at most).
@@ -11194,12 +9564,9 @@ class Viewport(QOpenGLWidget):
         pass). Here the rays share it: one box test for all of them against
         every span, then each span's triangles against the rays that reach
         it. Same rays (built with the same QVector3D arithmetic), same
-        acceptance as ``_ray_hits``; with an active section cut — per-face
-        rules — it asks ``_is_occluded`` point by point."""
+        acceptance as ``_ray_hits``."""
         import numpy as np
         worlds = list(worlds)
-        if worlds and _active_cut(self.scene) is not None:
-            return [self._is_occluded(w) for w in worlds]   # the cut first (#384)
         out = [False] * len(worlds)
         if not worlds or self._effective_style().face_mode in ("xray",
                                                                "wireframe"):
@@ -11208,8 +9575,6 @@ class Viewport(QOpenGLWidget):
         own = getattr(idx, "own_spans", None) or ()
         if getattr(idx, "tri_v0", None) is None and not own:
             return out
-        if _active_cut(self.scene) is not None:
-            return [self._is_occluded(w) for w in worlds]
         origin = self.camera.eye()
         rows, dirs, dists = [], [], []
         for i, w in enumerate(worlds):
@@ -12079,9 +10444,8 @@ class Viewport(QOpenGLWidget):
         selection, and «Make Group» with it (#378)."""
         picked = (self.pick_text_label(x, y, rect_only=True)
                   or self.pick_group(x, y) or self.pick_edge(x, y)
-                  or self.pick_geopath(x, y) or self.pick_dimension(x, y)
+                  or self.pick_dimension(x, y)
                   or self.pick_text_label(x, y)
-                  or self.pick_section_plane(x, y)
                   or self.pick_guide(x, y)
                   or self.pick_face(x, y)
                   or self.pick_image_plane(x, y)
@@ -12594,13 +10958,6 @@ class Viewport(QOpenGLWidget):
 
         # Track cursor + hover edge so Down can capture a reference edge.
         self._last_mouse_pos = ev.position()
-        self._emit_coordinate(ev)
-        _hmark("coord")
-        # Plan↔profile link (Track G): let an open profile mark the station of
-        # the route point under the cursor.
-        win = self.window()
-        if hasattr(win, "on_viewport_hover"):
-            win.on_viewport_hover(ev.position().x(), ev.position().y())
         self.inference.acquire(ev.position().x(), ev.position().y())
 
         if self.active_tool is None:
@@ -13672,13 +12029,8 @@ class Viewport(QOpenGLWidget):
         self._sync_projection()
         self.update()
 
-    def toggle_two_point(self) -> None:
-        self.camera.toggle_two_point()
-        self._sync_projection()
-        self.update()
-
     def set_projection(self, mode: str) -> None:
-        """Parallel, perspective or two-point (the View toolbar's buttons)."""
+        """Parallel or perspective (the View toolbar's buttons)."""
         self.camera.set_projection(mode)
         self._sync_projection()
         self.update()

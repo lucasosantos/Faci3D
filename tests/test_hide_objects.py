@@ -24,7 +24,6 @@ _app = QGuiApplication.instance() or QGuiApplication([])
 from core.group import Group, copy_group
 from core.history import HideCommand, HideEdgesCommand, History
 from core.mesh import Mesh
-from core.saved_views import SavedView
 from core.scene import Scene
 from formats import igz
 
@@ -146,8 +145,7 @@ def test_the_hidden_view_makes_hidden_things_selectable_but_never_visible():
     assert scene.entity_selectable(face) and not scene.entity_visible(face)
 
 
-def test_hidden_view_flags_travel_in_the_document_and_in_scenes(tmp_path):
-    from types import SimpleNamespace
+def test_hidden_view_flags_travel_in_the_document(tmp_path):
     scene = Scene()
     scene.show_hidden_objects = True
     p = tmp_path / "vista.igz"
@@ -155,14 +153,6 @@ def test_hidden_view_flags_travel_in_the_document_and_in_scenes(tmp_path):
     scene2 = Scene()
     igz.load_into(scene2, p)
     assert scene2.show_hidden_objects and not scene2.show_hidden_geometry
-
-    cam = SimpleNamespace(target=QVector3D(0, 0, 0), distance=10.0, yaw=0.5,
-                          pitch=0.4, fov_deg=45.0, perspective=True)
-    view = SavedView.capture("fantasmas", scene, cam)
-    assert view.hidden_shown == {"objects": True, "geometry": False}
-    scene.show_hidden_objects = False
-    SavedView.from_dict(view.to_dict()).apply(scene, cam)
-    assert scene.show_hidden_objects
 
 
 def test_ghost_pass_draws_and_unhide_selected_brings_them_back():
@@ -226,42 +216,6 @@ def test_every_group_gets_its_own_uid_and_a_copy_a_new_one():
     assert copy_group(g).hidden
 
 
-def test_a_scene_remembers_which_objects_are_hidden():
-    from types import SimpleNamespace
-    scene = Scene()
-    g1, g2 = _group("a"), _group("b", x0=3.0)
-    scene.groups += [g1, g2]
-    cam = SimpleNamespace(target=QVector3D(0, 0, 0), distance=10.0, yaw=0.5,
-                          pitch=0.4, fov_deg=45.0, perspective=True)
-    g2.hidden = True
-    view = SavedView.capture("sin caja b", scene, cam)
-    assert view.hidden_objects == [g2.uid]
-
-    g2.hidden = False
-    g1.hidden = True
-    view.apply(scene, cam)
-    assert g2.hidden and not g1.hidden          # exactly what was saved
-
-    # …and it survives the document.
-    raw = view.to_dict()
-    assert raw["hidden_objects"] == [g2.uid]
-    again = SavedView.from_dict(raw)
-    assert again.hidden_objects == [g2.uid]
-
-
-def test_a_scene_from_before_this_field_leaves_hidden_objects_alone():
-    from types import SimpleNamespace
-    scene = Scene()
-    g = _group()
-    scene.groups.append(g)
-    cam = SimpleNamespace(target=QVector3D(0, 0, 0), distance=10.0, yaw=0.5,
-                          pitch=0.4, fov_deg=45.0, perspective=True)
-    old = SavedView.from_dict({"name": "vieja", "target": [0, 0, 0],
-                               "distance": 10.0, "yaw": 0.0, "pitch": 0.3})
-    assert old.hidden_objects is None
-    g.hidden = True
-    old.apply(scene, cam)
-    assert g.hidden                              # hands-off
 
 
 def test_hiding_a_container_hides_its_nested_placements_in_the_viewport():

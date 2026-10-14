@@ -26,11 +26,6 @@ def _make_style():
     return Style()
 
 
-def _make_shadows():
-    from core.sun import ShadowSettings
-    return ShadowSettings()
-
-
 @dataclass
 class Scene:
     mesh: Mesh = field(default_factory=Mesh)
@@ -47,18 +42,12 @@ class Scene:
     dimensions: list = field(default_factory=list)
     # Leader-text annotations (the Text tool) — same overlay treatment.
     text_labels: list = field(default_factory=list)
-    # Georef traced paths (roads / boundaries / alignments) — first-class georef
-    # entities, kept out of the topology mesh entirely (Track G).
-    geo_paths: list = field(default_factory=list)
-    # Imported survey points (GPS / total station, UTM CSV) — reference markers
-    # the trace snaps to; never part of the mesh (Track G, municipal flow).
-    geo_points: list = field(default_factory=list)
     # Construction guides (Tape Measure): infinite dashed lines / points used to
     # align real drawing. Scaffolding, never part of the mesh.
     guides: list = field(default_factory=list)
     # Imported reference images (core.image_plane.ImagePlane) — a scanned plan
-    # or photo you trace over. Display-only like the terrain and for the same
-    # reason (invariant #4): reference to draw on top of, never topology.
+    # or photo you trace over. Display-only: reference to draw on top of,
+    # never topology.
     image_planes: list = field(default_factory=list)
     # Layers / tags: labels with visibility + lock. The default
     # layer always exists; entities reference layers by name.
@@ -71,15 +60,6 @@ class Scene:
     # attrs (color/texture) as the render truth and optionally carry
     # attrs["mat"] = name. See core/materials.py.
     materials: dict = field(default_factory=dict)
-    # Saved views ("Scenes"): named camera + layer-visibility
-    # snapshots (core.saved_views.SavedView). Presentation state, no geometry.
-    saved_views: list = field(default_factory=list)
-    # Sheet compositions (core.composition.Composicion) — the print layouts.
-    compositions: list = field(default_factory=list)
-    # Scales (1:N) typed by the user in the composer beyond the common
-    # presets — kept with the document so every frame of the file offers
-    # them again (Marco, 2026-09-02).
-    custom_scales: list = field(default_factory=list)
     #: Component definitions the document keeps with no copy placed —
     #: each a placement-free template :class:`~core.group.Group` (identity
     #: ``xform``) that shares its prototype with any copies still in the
@@ -127,14 +107,6 @@ class Scene:
     # Active display style (Styles): face mode, edges, background.
     # The viewport reads it every frame; scenes snapshot it (core/style.py).
     display_style: object = field(default_factory=lambda: _make_style())
-    # Sun shadows (core/sun.py): whether they draw, and the local date/time
-    # the sun stands at. Document data — the shadow study is a deliverable.
-    shadows: object = field(default_factory=lambda: _make_shadows())
-    # Section planes (core/section.py). At most ONE is
-    # ``active`` (the cut) in the model context; the two flags mirror
-    # View ▸ Section Planes / Section Cuts toggles.
-    section_planes: list = field(default_factory=list)
-    show_section_planes: bool = True
     # View ▸ Hidden Objects / Hidden Geometry: hidden objects
     # (groups, components) and hidden geometry (faces, edges) are drawn
     # as a see-through grid and become selectable — the way back to
@@ -147,25 +119,6 @@ class Scene:
     # the same definition) leave the frame instead of fading with the rest.
     # A view preference, not document content: only read while editing.
     hide_similar_components: bool = False
-    show_section_cuts: bool = True
-    # Georeferencing anchor (Track G). ``None`` until the user sets a datum;
-    # once set, geodetic ↔ local-metre conversion goes through it. Terrain and
-    # tiles are separate display-only objects added in later phases.
-    georef: object | None = None
-    # Base-map tile layer (Track G, G1) — display-only, never welded into the
-    # mesh. Runtime state (not serialised as geometry); requires ``georef``.
-    tile_layer: object | None = None
-    # 3D draped terrain (Track G, G2 full) — display-only relief mesh, runtime.
-    terrain: object | None = None
-    # Photogrammetric survey (Track G, G6) — the drone flight's own textured
-    # mesh from WebODM/ODM. Display-only like the terrain, and for the same
-    # reason: hundreds of thousands of reconstruction triangles are reference
-    # geometry to trace over, never topology-engine geometry (invariant #4).
-    photo_mesh: object | None = None
-    # BIM "active class" (tag-as-you-draw): while set, faces created by the
-    # drawing tools are stamped with this tag ({"id", "class", "name"}) at
-    # commit time. Runtime UI mode — never serialised.
-    active_ifc: object | None = None
     # Group-edit context (Groups v2): while set, ``mesh`` POINTS AT the edited
     # group's mesh so every tool/command works inside the group transparently;
     # ``_loose_mesh`` keeps the real loose mesh for render and restore.
@@ -291,20 +244,6 @@ class Scene:
         """``uid → group`` over the whole tree (nested placements too)."""
         from core.purge import iter_groups
         return {g.uid: g for g in iter_groups(self.groups)}
-
-    # ---- Sections (section planes) -------------------------------------------
-    def active_section(self):
-        """The section plane currently cutting the model, or ``None``."""
-        for sp in self.section_planes:
-            if sp.active:
-                return sp
-        return None
-
-    def set_active_section(self, plane) -> None:
-        """Make ``plane`` the ONE active cut (None deactivates all) —
-        one active cut per context."""
-        for sp in self.section_planes:
-            sp.active = sp is plane
 
     # ---- Group-edit context (Groups v2) --------------------------------------
     def begin_group_edit(self, group) -> None:
@@ -605,38 +544,23 @@ class Scene:
     def clear(self) -> None:
         self.end_group_edit()
         if (self.mesh.edges or self.mesh.faces or self.selection
-                or self.groups or self.dimensions or self.georef
-                or self.tile_layer or self.geo_paths or self.terrain
-                or self.guides or self.geo_points or self.text_labels
-                or self.saved_views or self.compositions
+                or self.groups or self.dimensions
+                or self.guides or self.text_labels
                 or self.image_planes or self.plugin_data
                 or self.kept_components):
             self.mesh.clear()
             self.groups.clear()
             self.dimensions.clear()
             self.text_labels.clear()
-            self.geo_paths.clear()
-            self.geo_points.clear()
             self.guides.clear()
             self.image_planes.clear()
-            self.saved_views.clear()
-            self.compositions.clear()
-            self.custom_scales.clear()
             self.kept_components.clear()
             self.plugin_data = {}
             self.selection.clear()
             from core.layers import DEFAULT_LAYER, Layer
             self.layers = [Layer(DEFAULT_LAYER)]
-            self.georef = None
-            self.tile_layer = None
-            self.terrain = None
             self.back_face_color = None
-            self.active_ifc = None
             self.display_style = _make_style()
-            self.shadows = _make_shadows()
-            self.section_planes.clear()
-            self.show_section_planes = True
-            self.show_section_cuts = True
             self.show_hidden_objects = False
             self.show_hidden_geometry = False
             self.version += 1

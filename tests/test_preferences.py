@@ -60,21 +60,16 @@ def test_ok_writes_the_settings(settings_file):
     win = _Win()
     dlg = PreferencesDialog(win)
     dlg._obj_unit.setCurrentIndex(dlg._obj_unit.findData("cm"))
-    dlg._dxf_unit.setCurrentIndex(dlg._dxf_unit.findData("m"))
-    dlg._coord.setCurrentIndex(dlg._coord.findData("utm"))
     dlg._model.setText("llama-3.3-70b")
     dlg._shots.setChecked(False)
     dlg._autosave_min.setValue(10)
     dlg._backup.setChecked(False)
     dlg._invert.setChecked(True)
     dlg._invert_orbit.setChecked(True)
-    dlg._look_sens.setValue(40)
     dlg._msaa.setCurrentIndex(dlg._msaa.findData(8))
     dlg.accept()
     st = _fresh(settings_file)
     assert st.value("import/obj_unit") == "cm"
-    assert st.value("import/dxf_unit") == "m"
-    assert st.value("georef/coord_mode") == "utm"
     assert st.value("ia/modelo") == "llama-3.3-70b"
     assert st.value("ia/capturas") == "0"
     assert st.value("General/autosave") == "1"
@@ -82,7 +77,6 @@ def test_ok_writes_the_settings(settings_file):
     assert st.value("General/backup") == "0"
     assert st.value("nav/invert_wheel") == "1"
     assert st.value("nav/invert_orbit_y") == "1"
-    assert int(st.value("walk/look_sensitivity")) == 40
     assert int(st.value("display/msaa")) == 8
     # The live pieces reach the viewport immediately.
     assert win.viewport._invert_wheel is True
@@ -112,12 +106,12 @@ def test_rest_mode_applies_through_the_viewport(settings_file):
 
 def test_dialog_reloads_saved_values(settings_file):
     st = _fresh(settings_file)
-    st.setValue("import/dxf_unit", "in")
+    st.setValue("import/obj_unit", "in")
     st.setValue("ia/proveedor", "auto")
     st.sync()
     win = _Win()                 # referenced: see the theme test below
     dlg = PreferencesDialog(win)
-    assert dlg._dxf_unit.currentData() == "in"
+    assert dlg._obj_unit.currentData() == "in"
     assert dlg._provider.currentData() == "auto"
 
 

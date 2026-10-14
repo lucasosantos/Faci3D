@@ -43,7 +43,7 @@ def reserve_group_names(names) -> None:
 
 
 class Group:
-    __slots__ = ("mesh", "name", "layer", "ifc", "billboard", "xform",
+    __slots__ = ("mesh", "name", "layer", "billboard", "xform",
                  "children", "owner", "context", "text3d", "hidden", "uid",
                  "material", "axes", "component", "exploded",
                  "explode_offset", "ext", "locked")
@@ -53,8 +53,6 @@ class Group:
         self.name = name or f"Group {next(_counter)}"
         # Layer / tag name (None = default layer).
         self.layer = None
-        # BIM tag ({"class": "IfcWall", "name": ...}) or None — see core/bim.py.
-        self.ifc = None
         # Face-me billboard: the group's textured quad rotates
         # around its vertical anchor axis to face the camera every frame.
         self.billboard = False
@@ -63,9 +61,8 @@ class Group:
         # laid out again in place. ``None`` on every other group.
         self.text3d = None
         # Extensions' own parameters for this container, by extension key
-        # ({"windowizer": {...}}): kept with copies and saved in the .igz,
-        # and apart from ``ifc``, which the BIM panel replaces when it
-        # retags. ``None`` when no extension wrote here.
+        # ({"my_extension": {...}}): kept with copies and saved in the .igz.
+        # ``None`` when no extension wrote here.
         self.ext = None
         # Hide: the object stays in the document but draws,
         # picks, snaps and exports as if it were not there — until Unhide,
@@ -611,7 +608,6 @@ def copy_group(group, delta=None, _in_definition=False):
         if getattr(group, "axes", None) is not None:
             g.axes = t * group.axes
     g.layer = group.layer
-    g.ifc = dict(group.ifc) if group.ifc else None
     g.billboard = group.billboard
     g.text3d = dict(group.text3d) if group.text3d else None
     g.ext = copy.deepcopy(group.ext) if getattr(group, "ext", None) else None

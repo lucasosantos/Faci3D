@@ -8,7 +8,7 @@ erases the whole stroke as ONE undo step. Erasing an edge takes its faces with
 it (and rubbing out a divider between coplanar faces merges them back — the
 EraseSelectionCommand semantics). A segment of a drawn curve (circle/arc)
 erases its whole contour, curves being single entities. Guides, dimensions,
-leader texts and georef paths are erased too (texts: @pacaeiro, issue #66).
+leader texts are erased too (texts: @pacaeiro, issue #66).
 Esc cancels the in-progress stroke.
 
 Shift held at press starts a HIDE stroke instead (the classic Shift+eraser):
@@ -30,7 +30,6 @@ from core.guide import Guide
 from core.history import (
     CompoundCommand,
     DeleteDimensionsCommand,
-    DeleteGeoPathsCommand,
     DeleteGroupCommand,
     DeleteGuidesCommand,
     DeleteTextLabelsCommand,
@@ -40,7 +39,6 @@ from core.history import (
 )
 from core.mesh import Edge
 from core.textlabel import TextLabel
-from georef.geopath import GeoPath
 from tools.base import Tool, ToolContext
 
 
@@ -117,7 +115,6 @@ class EraserTool(Tool):
             return
         guides = [m for m in marked if isinstance(m, Guide)]
         dims = [m for m in marked if isinstance(m, Dimension)]
-        paths = [m for m in marked if isinstance(m, GeoPath)]
         labels = [m for m in marked if isinstance(m, TextLabel)]
         cmds = []
         if edges:
@@ -127,8 +124,6 @@ class EraserTool(Tool):
             cmds.append(DeleteGuidesCommand(guides))
         if dims:
             cmds.append(DeleteDimensionsCommand(dims))
-        if paths:
-            cmds.append(DeleteGeoPathsCommand(paths))
         if labels:
             cmds.append(DeleteTextLabelsCommand(labels))
         if cmds:
@@ -153,8 +148,6 @@ class EraserTool(Tool):
                 segs.append(m.segment())
             elif isinstance(m, Dimension):
                 segs.append(m.line_points())
-            elif isinstance(m, GeoPath):
-                segs.extend(m.segments())
             elif isinstance(m, TextLabel):
                 segs.append((m.anchor, m.position()))
         return segs
@@ -217,9 +210,6 @@ class EraserTool(Tool):
         if label is not None:
             self.marked.add(label)
             return
-        path = viewport.pick_geopath(sx, sy)
-        if path is not None:
-            self.marked.add(path)
 
     def _reset(self) -> None:
         self._stroke = False

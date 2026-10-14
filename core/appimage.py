@@ -3,7 +3,7 @@
 """Desktop integration for the AppImage build.
 
 An AppImage is a single file: it runs from anywhere but shows up nowhere —
-no launcher in the applications menu, no icon on the file, .igz files not
+no launcher in the applications menu, no icon on the file, .faci3d files not
 associated (Rafael's review, 2026-09-10: «las AppImages arrancan bien pero
 no traen integración de escritorio»). Tools like AppImageLauncher or Gear
 Lever do that job when they are installed; this module does it from inside
@@ -22,8 +22,10 @@ import subprocess
 from pathlib import Path
 from typing import Optional
 
-DESKTOP_NAME = "ingetrazo.desktop"
-ICON_NAME = "ingetrazo.png"
+#: Faci3D's own desktop id: "ingetrazo" is IngeTrazo's, and with an
+#: IngeTrazo installed beside it the shell gave our window its name and icon.
+DESKTOP_NAME = "faci3d.desktop"
+ICON_NAME = "faci3d.png"
 
 
 def appimage_path() -> Optional[Path]:
@@ -76,11 +78,11 @@ def _desktop_entry(appimage: Path) -> str:
         "Comment[pt_BR]=Modelador 3D livre e simples para impressão 3D\n"
         f'Exec="{exe}" %f\n'
         f'TryExec={exe}\n'
-        "Icon=ingetrazo\n"
+        "Icon=faci3d\n"
         "Terminal=false\n"
         "Categories=Graphics;3DGraphics;\n"
-        "MimeType=application/x-ingetrazo;model/vnd.collada+xml;application/vnd.sketchup.skp;\n"
-        "StartupWMClass=ingetrazo\n"
+        "MimeType=application/x-faci3d;application/x-ingetrazo;model/vnd.collada+xml;application/vnd.sketchup.skp;\n"
+        "StartupWMClass=faci3d\n"
         "X-AppImage-Integrated=true\n"
     )
 

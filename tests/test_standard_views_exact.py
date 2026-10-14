@@ -55,17 +55,6 @@ def test_the_screen_keeps_its_orientation_from_the_89_degree_days():
     assert n[1] < o[1] and e[0] > o[0]
 
 
-def test_the_camera_bases_do_not_degenerate():
-    """camera_basis (hidden-line pass, sheets) and the view rotation read
-    the same effective up: right and up stay unit vectors at the pole."""
-    from core.hlr import camera_basis
-    for view in ("top", "bottom"):
-        c = _camera(view)
-        _eye, right, up, fwd = camera_basis(c)
-        assert abs(float((right ** 2).sum()) - 1.0) < 1e-9
-        assert abs(float((up ** 2).sum()) - 1.0) < 1e-9
-        assert abs(float((right * fwd).sum())) < 1e-9
-
 
 def test_the_other_views_and_a_rolled_up_are_untouched():
     c = _camera("front")

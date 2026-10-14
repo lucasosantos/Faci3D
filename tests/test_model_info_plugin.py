@@ -4,7 +4,7 @@
 
 Each test in the second half pins one of the wrong numbers the original
 contribution (PR #2) reported: materials read from a key IngeTrazo never
-writes (always empty), BIM counted per face instead of per object, totals
+writes (always empty), totals
 double-counted while a group was open for editing, and colour swatches
 assumed 0–255 ints where IngeTrazo paints with floats 0–1.
 """
@@ -25,7 +25,6 @@ elif not isinstance(_inst, QApplication):
     pytest.skip("a non-widget QGuiApplication is already active",
                 allow_module_level=True)
 
-from core import bim                                              # noqa: E402
 from core.group import Group                                      # noqa: E402
 from core.mesh import Mesh                                        # noqa: E402
 from core.scene import Scene                                      # noqa: E402
@@ -46,7 +45,6 @@ def test_empty_scene():
     assert stats["total_verts"] == 0
     assert stats["bbox"]["width"] == 0.0
     assert stats["colors"] == [] and stats["textures"] == []
-    assert stats["bim_objects"] == []
 
 
 def test_geometry_and_groups():
@@ -120,20 +118,6 @@ def test_materials_group_under_their_registry_name():
     assert "rgb(204,26,26)" in text                  # anonymous keeps rgb
 
 
-def test_bim_counts_objects_not_faces():
-    """One wall spanning six tagged faces is ONE IfcWall — the same answer
-    core.bim gives the BIM tray and the IFC export. PR #2 said six."""
-    scene = Scene()
-    faces = [_quad(scene.mesh, z=float(i)) for i in range(6)]
-    bim.tag_faces(faces, "IfcWall", "Muro 1", obj_id=1)
-
-    stats = _collect_stats(scene)
-    assert len(stats["bim_objects"]) == 1
-    assert stats["bim_by_class"] == {"IfcWall": 1}
-    obj = stats["bim_objects"][0]
-    assert obj["name"] == "Muro 1"
-    assert abs(obj["area"] - 6 * 16.0) < 1e-6    # quantities come along
-
 
 def test_totals_stable_while_a_group_is_open():
     """begin_group_edit swaps scene.mesh to the group's mesh; reading it
@@ -157,15 +141,6 @@ def test_totals_stable_while_a_group_is_open():
     assert opened["loose_verts"] == closed["loose_verts"]
 
 
-def test_showcase_key_ifc_class_is_not_bim():
-    """attrs["ifc_class"] (what PR #3's showcase script wrote) is not the
-    key IngeTrazo reads: it must NOT surface as a BIM object here, exactly
-    as it does not surface in the BIM tray or the IFC export."""
-    scene = Scene()
-    f = _quad(scene.mesh)
-    f.attrs["ifc_class"] = "IfcSlab"
-    assert _collect_stats(scene)["bim_objects"] == []
-
 
 # ---- Formatting -----------------------------------------------------------
 
@@ -182,8 +157,6 @@ def test_stats_to_text_mentions_the_essentials():
     scene = Scene()
     f = _quad(scene.mesh)
     f.attrs["color"] = (1.0, 0.0, 0.0)
-    bim.tag_faces([f], "IfcSlab", "Losa", obj_id=1)
     text = _stats_to_text(_collect_stats(scene))
     assert "rgb(255,0,0)" in text
-    assert "IfcSlab" in text and "Losa" in text
     assert "Layer 0" in text

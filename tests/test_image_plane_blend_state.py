@@ -1,11 +1,8 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (C) 2026 Marco Sumari Tellez and IngeTrazo contributors.
-"""A faded reference image must not switch the frame's blending off: the
-shadow catcher that follows writes alpha 0 where the sun reaches, and
-without blending that is a transparent hole the size of the model's
-shadow square — white on screen, and only on frames that REUSE the
-cached shadow map (orbit, zoom), since a rebuild re-enables blending on
-its way out. Marco, 2026-09-14: «puse sombras con el tif activo y orbité».
+"""A faded reference image must not switch the frame's blending off:
+every later blended pass would run opaque and could write alpha 0 into
+the frame — a transparent hole, white on screen.
 
 Needs a GL context; skipped where the offscreen platform has none."""
 from __future__ import annotations
@@ -50,8 +47,6 @@ def test_a_translucent_image_leaves_blending_on_for_the_shadow_catcher(tmp_path)
         pic.save(str(path))
         scene.image_planes.append(ImagePlane(
             str(path), V(-20, -20, 0), V(40, 0, 0), V(0, 40, 0), opacity=0.5))
-        scene.shadows.enabled = True
-        scene.shadows.hour = 12
         scene.version += 1
         vp.camera.set_view("iso")
         vp.camera.fit_to(V(-20, -20, 0), V(20, 20, 2))

@@ -53,7 +53,8 @@ TARBALL="$OUT/Faci3D-$VERSION-linux-$ARCH.tar.gz"
 rm -rf "$TARDIR"
 mkdir -p "$TARDIR" "$OUT"
 cp -a "$WORK/pyi/ingetrazo/." "$TARDIR/"
-cp packaging/ingetrazo.desktop resources/icons/ingetrazo_256.png "$TARDIR/"
+cp packaging/faci3d.desktop "$TARDIR/"
+cp resources/icons/ingetrazo_256.png "$TARDIR/faci3d.png"
 cat > "$TARDIR/README.txt" <<'TXT'
 Faci3D — portable Linux build
 =============================
@@ -62,7 +63,7 @@ Run it:            ./ingetrazo          (or: ./ingetrazo model.igz)
 Self-diagnosis:    ./ingetrazo --check
 
 No installation required. To add a launcher and the .igz/.skp icons,
-edit the Exec= line of ingetrazo.desktop to this folder's path and copy
+edit the Exec= line of faci3d.desktop to this folder's path and copy
 it to ~/.local/share/applications/.
 
 Prefer the AppImage from the same release if your distro has FUSE.
@@ -78,11 +79,11 @@ cp -a "$WORK/pyi/ingetrazo/." "$APPDIR/usr/bin/"
 
 # AppImage wants the icon and desktop file at the AppDir root as well.
 cp resources/icons/ingetrazo_256.png \
-   "$APPDIR/usr/share/icons/hicolor/256x256/apps/ingetrazo.png"
-cp resources/icons/ingetrazo_256.png "$APPDIR/ingetrazo.png"
-sed 's|^Exec=.*|Exec=ingetrazo %f|; s|^Icon=.*|Icon=ingetrazo|' \
-    packaging/ingetrazo.desktop > "$APPDIR/usr/share/applications/ingetrazo.desktop"
-cp "$APPDIR/usr/share/applications/ingetrazo.desktop" "$APPDIR/ingetrazo.desktop"
+   "$APPDIR/usr/share/icons/hicolor/256x256/apps/faci3d.png"
+cp resources/icons/ingetrazo_256.png "$APPDIR/faci3d.png"
+sed 's|^Exec=.*|Exec=ingetrazo %f|; s|^Icon=.*|Icon=faci3d|' \
+    packaging/faci3d.desktop > "$APPDIR/usr/share/applications/faci3d.desktop"
+cp "$APPDIR/usr/share/applications/faci3d.desktop" "$APPDIR/faci3d.desktop"
 
 # AppRun: keep the launcher tiny and let Qt find its own plugins, which the
 # PyInstaller bundle already lays out next to the binary.

@@ -5,10 +5,9 @@
 Three tabs. **General**: UI language (applied on restart, same contract as
 the Window ▸ Language menu) and how the rest of the model reads while
 editing a group (applied live through ``set_edit_rest_mode``, the same path
-the Camera menu uses, so its checkmarks stay honest). **Import**: the units
-suggested by the OBJ and DXF/DWG import dialogs (each dialog still asks —
-these are the preselected answers) and the coordinate-entry mode shared by
-the georef dialogs. **AI Assistant**: the same ``ia/*`` keys the assistant
+the Camera menu uses, so its checkmarks stay honest). **Import**: the unit
+suggested by the OBJ import dialog (the dialog still asks — this is the
+preselected answer). **AI Assistant**: the same ``ia/*`` keys the assistant
 dialog reads when it opens — provider, API key, model, Ollama URL,
 screenshots.
 
@@ -43,8 +42,6 @@ from core.i18n import available_languages, current_language, tr
 #: The import dialogs' unit vocabularies (must match the dialogs in
 #: main_window — the setting is their preselected answer).
 _OBJ_UNITS = (("m", "Metres"), ("cm", "Centimetres"), ("mm", "Millimetres"),
-              ("in", "Inches"), ("ft", "Feet"))
-_DXF_UNITS = (("mm", "Millimetres"), ("cm", "Centimetres"), ("m", "Metres"),
               ("in", "Inches"), ("ft", "Feet"))
 _REST_MODES = (("normal", "Show normally"), ("fade", "Fade"),
                ("hide", "Hide (fastest)"))
@@ -139,12 +136,6 @@ class PreferencesDialog(QDialog):
             "so fewer steps mean less memory on a big model; 0 = unlimited."))
         form.addRow(tr("Undo steps"), self._undo_steps)
 
-        self._ask_section = QCheckBox(tr(
-            "Ask for a name and symbol when placing a section plane"))
-        self._ask_section.setChecked(
-            str(st.value("section/ask_name", "1")) != "0")
-        form.addRow("", self._ask_section)
-
         # A new document starts with the 1.70 m scale figure; someone who
         # models parts for a 3D printer starts on an empty sheet (#221).
         self._scale_figure = QCheckBox(tr(
@@ -162,14 +153,6 @@ class PreferencesDialog(QDialog):
         self._invert_orbit.setChecked(str(st.value("nav/invert_orbit_y", "0"))
                                       != "0")
         form.addRow("", self._invert_orbit)
-
-        from tools.walkthrough import look_sensitivity
-        self._look_sens = QSpinBox()
-        self._look_sens.setRange(1, 100)
-        self._look_sens.setValue(look_sensitivity())
-        self._look_sens.setToolTip(tr(
-            "How fast a drag turns the head in First Person"))
-        form.addRow(tr("Mouse-look sensitivity:"), self._look_sens)
 
         self._msaa = QComboBox()
         for n in (0, 2, 4, 8):
@@ -264,19 +247,6 @@ class PreferencesDialog(QDialog):
             str(st.value("import/obj_unit", "m") or "m"))))
         form.addRow(tr("Suggested unit for OBJ:"), self._obj_unit)
 
-        self._dxf_unit = QComboBox()
-        for key, label in _DXF_UNITS:
-            self._dxf_unit.addItem(tr(label), key)
-        self._dxf_unit.setCurrentIndex(max(0, self._dxf_unit.findData(
-            str(st.value("import/dxf_unit", "mm") or "mm"))))
-        form.addRow(tr("Suggested unit for DXF/DWG:"), self._dxf_unit)
-
-        self._coord = QComboBox()
-        self._coord.addItem(tr("Geographic (lat/lon)"), "geo")
-        self._coord.addItem(tr("UTM WGS84"), "utm")
-        self._coord.setCurrentIndex(max(0, self._coord.findData(
-            str(st.value("georef/coord_mode", "geo") or "geo"))))
-        form.addRow(tr("Coordinate entry:"), self._coord)
         tabs.addTab(imp, tr("Import"))
 
         # ---- AI Assistant ---------------------------------------------------
@@ -434,8 +404,6 @@ class PreferencesDialog(QDialog):
                       st)
         _gs.set_value("autosave_min", self._autosave_min.value(), st)
         _gs.set_value("backup", "1" if self._backup.isChecked() else "0", st)
-        st.setValue("section/ask_name",
-                    "1" if self._ask_section.isChecked() else "0")
         st.setValue("new_document/scale_figure",
                     "1" if self._scale_figure.isChecked() else "0")
         _gs.set_value("undo_steps", int(self._undo_steps.value()), st)
@@ -472,7 +440,6 @@ class PreferencesDialog(QDialog):
         self._window.viewport._invert_orbit_y = self._invert_orbit.isChecked()
 
         # First Person reads it on every look move: nothing to push.
-        st.setValue("walk/look_sensitivity", int(self._look_sens.value()))
 
         msaa = self._msaa.currentData()
         st.setValue("display/msaa", msaa)
@@ -497,8 +464,6 @@ class PreferencesDialog(QDialog):
                 save_toolbar_icon_px(px)
 
         st.setValue("import/obj_unit", self._obj_unit.currentData())
-        st.setValue("import/dxf_unit", self._dxf_unit.currentData())
-        st.setValue("georef/coord_mode", self._coord.currentData())
 
         st.setValue("ia/proveedor", self._provider.currentData())
         st.setValue("ia/api_key", self._api_key.text())

@@ -1384,301 +1384,17 @@ class AddGuideCommand(Command):
         scene.version += 1
 
 
-class PlaceSectionPlaneCommand(Command):
-    """Place a section plane. The new plane immediately becomes
-    the ACTIVE cut of the context; undo restores the previous one."""
 
-    def __init__(self, plane) -> None:
-        self.plane = plane
-        self._prev_active = None
 
-    def do(self, scene) -> None:
-        self._prev_active = scene.active_section()
-        scene.section_planes.append(self.plane)
-        scene.set_active_section(self.plane)
-        scene.selection.clear()
-        scene.selection.add(self.plane)
-        scene.version += 1
 
-    def undo(self, scene) -> None:
-        if self.plane in scene.section_planes:
-            scene.section_planes.remove(self.plane)
-        scene.selection.discard(self.plane)
-        prev = self._prev_active
-        scene.set_active_section(
-            prev if prev in scene.section_planes else None)
-        scene.version += 1
 
 
-class DeleteSectionPlanesCommand(Command):
-    """Remove section planes; undo restores them at their positions with
-    their active state."""
 
-    def __init__(self, planes) -> None:
-        self._planes = list(planes)
-        self._restore: list[tuple[int, object]] = []
 
-    def do(self, scene) -> None:
-        self._restore = [(scene.section_planes.index(p), p)
-                         for p in self._planes if p in scene.section_planes]
-        for p in self._planes:
-            if p in scene.section_planes:
-                scene.section_planes.remove(p)
-            scene.selection.discard(p)
-        scene.version += 1
 
-    def undo(self, scene) -> None:
-        for i, p in sorted(self._restore):
-            scene.section_planes.insert(i, p)
-        scene.version += 1
 
 
-class ReverseSectionPlaneCommand(Command):
-    """Reverse: flip which side the plane hides."""
 
-    def __init__(self, plane) -> None:
-        self.plane = plane
-
-    def do(self, scene) -> None:
-        self.plane.flip()
-        scene.version += 1
-
-    def undo(self, scene) -> None:
-        self.plane.flip()
-        scene.version += 1
-
-
-class SetActiveSectionCommand(Command):
-    """Make ``plane`` the active cut (or ``None`` to deactivate) — the
-    Active Cut toggle / double-click."""
-
-    def __init__(self, plane) -> None:
-        self.plane = plane
-        self._prev = None
-
-    def do(self, scene) -> None:
-        self._prev = scene.active_section()
-        scene.set_active_section(self.plane)
-        scene.version += 1
-
-    def undo(self, scene) -> None:
-        prev = self._prev
-        scene.set_active_section(
-            prev if prev in scene.section_planes else None)
-        scene.version += 1
-
-
-class SetSectionModeCommand(Command):
-    """One section plane's mode, from the Browser: whether it CUTS
-    (it becomes the active cut — or none is) and whether its FRAME shows.
-    Cut and frame, cut only, frame only, or off — one undo step."""
-
-    def __init__(self, plane, cut: bool, frame: bool) -> None:
-        self.plane = plane
-        self.cut = bool(cut)
-        self.frame = bool(frame)
-        self._prev = None
-
-    def do(self, scene) -> None:
-        self._prev = (scene.active_section(),
-                      bool(getattr(self.plane, "hidden", False)))
-        if self.cut:
-            scene.set_active_section(self.plane)
-        elif self.plane.active:
-            scene.set_active_section(None)
-        self.plane.hidden = not self.frame
-        if self.plane.hidden:
-            scene.selection.discard(self.plane)
-        scene.version += 1
-
-    def undo(self, scene) -> None:
-        active, hidden = self._prev
-        scene.set_active_section(
-            active if active in scene.section_planes else None)
-        self.plane.hidden = hidden
-        scene.version += 1
-
-
-class SetSectionFillCommand(Command):
-    """One section plane's own fill — pattern, colour, hatch spacing —
-    over the style's. ``fill=None`` goes back to the style's fill."""
-
-    def __init__(self, plane, fill) -> None:
-        self.plane = plane
-        self.fill = dict(fill) if fill else None
-        self._prev = None
-
-    def do(self, scene) -> None:
-        prev = getattr(self.plane, "fill", None)
-        self._prev = dict(prev) if prev else None
-        self.plane.fill = dict(self.fill) if self.fill else None
-        scene.version += 1
-
-    def undo(self, scene) -> None:
-        self.plane.fill = dict(self._prev) if self._prev else None
-        scene.version += 1
-
-
-class RenameSectionPlaneCommand(Command):
-    """A section plane's name and symbol (the symbol reads on its frame and
-    in the sheets' section marks)."""
-
-    def __init__(self, plane, name: str, symbol: str) -> None:
-        self.plane = plane
-        self.name = name
-        self.symbol = symbol
-        self._prev = None
-
-    def do(self, scene) -> None:
-        self._prev = (self.plane.name, self.plane.symbol)
-        self.plane.name, self.plane.symbol = self.name, self.symbol
-        scene.version += 1
-
-    def undo(self, scene) -> None:
-        self.plane.name, self.plane.symbol = self._prev
-        scene.version += 1
-
-
-class AddSheetCommand(Command):
-    """A new sheet at the end of the set."""
-
-    def __init__(self, sheet) -> None:
-        self.sheet = sheet
-
-    def do(self, scene) -> None:
-        scene.compositions.append(self.sheet)
-        scene.version += 1
-
-    def undo(self, scene) -> None:
-        if self.sheet in scene.compositions:
-            scene.compositions.remove(self.sheet)
-        scene.version += 1
-
-
-class PlaceViewCommand(Command):
-    """A view frame placed on a sheet — a scene dropped on it in the
-    Browser. One undo step."""
-
-    def __init__(self, sheet, frame) -> None:
-        self.sheet = sheet
-        self.frame = frame
-
-    def do(self, scene) -> None:
-        self.sheet.frames.append(self.frame)
-        scene.version += 1
-
-    def undo(self, scene) -> None:
-        if self.frame in self.sheet.frames:
-            self.sheet.frames.remove(self.frame)
-        scene.version += 1
-
-
-class MoveSheetCommand(Command):
-    """A sheet to another place in the set: the order the strip shows,
-    the atlas prints and {hoja} counts."""
-
-    def __init__(self, sheet, index: int) -> None:
-        self.sheet = sheet
-        self.index = index
-        self._old = None
-
-    def do(self, scene) -> None:
-        comps = scene.compositions
-        self._old = comps.index(self.sheet)
-        comps.remove(self.sheet)
-        comps.insert(max(0, min(self.index, len(comps))), self.sheet)
-        scene.version += 1
-
-    def undo(self, scene) -> None:
-        comps = scene.compositions
-        comps.remove(self.sheet)
-        comps.insert(self._old, self.sheet)
-        scene.version += 1
-
-
-class CreatePlanCommand(Command):
-    """A floor plan from a group, in one undo step: a horizontal section
-    plane at the cut height (made the active cut), a scene looking down on
-    it in parallel projection, and — optionally — a sheet with that scene in
-    a view frame."""
-
-    def __init__(self, plane, view, sheet=None,
-                 add_plane: bool = True) -> None:
-        self.plane = plane
-        self.view = view
-        self.sheet = sheet
-        #: False: the plane is already in the model (a view of an existing
-        #: cut) — it is made the active cut, not added.
-        self.add_plane = add_plane
-        self._prev_active = None
-
-    def do(self, scene) -> None:
-        self._prev_active = scene.active_section()
-        if self.add_plane:
-            scene.section_planes.append(self.plane)
-        scene.set_active_section(self.plane)
-        scene.saved_views.append(self.view)
-        if self.sheet is not None:
-            scene.compositions.append(self.sheet)
-        scene.version += 1
-
-    def undo(self, scene) -> None:
-        if self.sheet is not None and self.sheet in scene.compositions:
-            scene.compositions.remove(self.sheet)
-        if self.view in scene.saved_views:
-            scene.saved_views.remove(self.view)
-        if self.add_plane and self.plane in scene.section_planes:
-            scene.section_planes.remove(self.plane)
-        prev = self._prev_active
-        scene.set_active_section(
-            prev if prev in scene.section_planes else None)
-        scene.selection.discard(self.plane)
-        scene.version += 1
-
-
-class MoveSectionPlanesCommand(Command):
-    """Translate section planes (the Move tool)."""
-
-    def __init__(self, planes, delta: QVector3D) -> None:
-        self._planes = list(planes)
-        self.delta = QVector3D(delta)
-
-    def do(self, scene) -> None:
-        for p in self._planes:
-            p.point = p.point + self.delta
-        scene.version += 1
-
-    def undo(self, scene) -> None:
-        for p in self._planes:
-            p.point = p.point - self.delta
-        scene.version += 1
-
-
-class RotateSectionPlanesCommand(Command):
-    """Rotate section planes about ``centre``/``axis`` (the Rotate tool):
-    the origin orbits and the normal turns."""
-
-    def __init__(self, planes, centre: QVector3D, axis: QVector3D,
-                 deg: float) -> None:
-        self._planes = list(planes)
-        self.centre = QVector3D(centre)
-        self.axis = QVector3D(axis)
-        self.deg = float(deg)
-
-    def _apply(self, scene, deg: float) -> None:
-        m = rotation_matrix(self.centre, self.axis, deg)
-        for p in self._planes:
-            p.point = m.map(p.point)
-            n = m.mapVector(p.normal)
-            if n.length() > 1e-12:
-                p.normal = n.normalized()
-        scene.version += 1
-
-    def do(self, scene) -> None:
-        self._apply(scene, self.deg)
-
-    def undo(self, scene) -> None:
-        self._apply(scene, -self.deg)
 
 
 class ChangeGuideCommand(Command):
@@ -1923,194 +1639,12 @@ class ScaleImagePlanesCommand(Command):
         self._apply(scene, invert_scale_factor(self.factor))
 
 
-class AddGeoPathCommand(Command):
-    """Add a traced georef path to ``scene.geo_paths`` (Track G)."""
-
-    def __init__(self, path) -> None:
-        self.path = path
-
-    def do(self, scene) -> None:
-        scene.geo_paths.append(self.path)
-        scene.version += 1
-
-    def undo(self, scene) -> None:
-        if self.path in scene.geo_paths:
-            scene.geo_paths.remove(self.path)
-        scene.selection.discard(self.path)
-        scene.version += 1
 
 
-class AutoTagDrawnFacesCommand(Command):
-    """Tag-as-you-draw (BIM active class): the final step of a draw plan when
-    ``scene.active_ifc`` is set. Stamps the active tag on the faces the plan
-    itself created — the drawn polygon, auto-closed cycles, chord halves —
-    identified through their ``AddFaceCommand``s, so churn re-emissions
-    (``auto=False``) and neighbouring rebuilt faces are never touched. A face
-    that inherited a tag from a tagged mother keeps it.
-
-    Each draw commit becomes its OWN BIM object (a fresh id is allocated at
-    execution time; the activation only fixes class + name): a wall drawn per
-    trace = one object per wall, so the largest-face metrado stays honest —
-    one shared id across many walls would under-report (the panel/IFC read
-    the biggest face of the whole set).
-
-    Runs inside the draw's :class:`SnapshotCompound`, before the after-state
-    snapshot, so undo/redo restore the tags exactly; its own undo is a no-op
-    (the snapshot restore reverts the attrs)."""
-
-    def __init__(self, face_commands, tag: dict) -> None:
-        self._face_cmds = list(face_commands)
-        self._tag = dict(tag)
-
-    def do(self, scene) -> None:
-        from core.bim import next_object_id
-        tag = dict(self._tag)
-        tag["id"] = next_object_id(scene)
-        live = scene.mesh.faces
-        for fc in self._face_cmds:
-            f = getattr(fc, "face", None)
-            if f is not None and f in live and not f.attrs.get("ifc"):
-                f.attrs["ifc"] = dict(tag)
-
-    def undo(self, scene) -> None:
-        pass
 
 
-class AddGeoPointsCommand(Command):
-    """Import a batch of survey points into ``scene.geo_points`` (Track G).
-    When the import also anchored the scene datum (first georef action on the
-    document), the datum travels with the command so undo restores the
-    previous one."""
-
-    def __init__(self, points, datum=None) -> None:
-        self._points = list(points)
-        self._datum = datum
-        self._prev_datum = None
-
-    def do(self, scene) -> None:
-        if self._datum is not None:
-            self._prev_datum = scene.georef
-            scene.georef = self._datum
-        scene.geo_points.extend(self._points)
-        scene.version += 1
-
-    def undo(self, scene) -> None:
-        for p in self._points:
-            if p in scene.geo_points:
-                scene.geo_points.remove(p)
-        if self._datum is not None:
-            scene.georef = self._prev_datum
-        scene.version += 1
 
 
-class DeleteGeoPointsCommand(Command):
-    """Remove survey points from ``scene.geo_points``."""
-
-    def __init__(self, points) -> None:
-        self._points = list(points)
-        self._restore: list[tuple[int, object]] = []
-
-    def do(self, scene) -> None:
-        self._restore = [(scene.geo_points.index(p), p)
-                         for p in self._points if p in scene.geo_points]
-        for p in self._points:
-            if p in scene.geo_points:
-                scene.geo_points.remove(p)
-        scene.version += 1
-
-    def undo(self, scene) -> None:
-        for i, p in sorted(self._restore):
-            scene.geo_points.insert(i, p)
-        scene.version += 1
-
-
-class DeleteGeoPathsCommand(Command):
-    """Remove georef paths from ``scene.geo_paths``."""
-
-    def __init__(self, paths) -> None:
-        self._paths = list(paths)
-        self._restore: list[tuple[int, object]] = []
-
-    def do(self, scene) -> None:
-        self._restore = [(scene.geo_paths.index(p), p)
-                         for p in self._paths if p in scene.geo_paths]
-        for p in self._paths:
-            if p in scene.geo_paths:
-                scene.geo_paths.remove(p)
-            scene.selection.discard(p)
-        scene.version += 1
-
-    def undo(self, scene) -> None:
-        for i, p in sorted(self._restore):
-            scene.geo_paths.insert(i, p)
-        scene.version += 1
-
-
-class ToggleGeoPathClosedCommand(Command):
-    """Flip open ↔ closed (loop) on a set of georef paths."""
-
-    def __init__(self, paths) -> None:
-        self._paths = list(paths)
-
-    def _flip(self, scene) -> None:
-        for p in self._paths:
-            p.closed = not p.closed
-        scene.version += 1
-
-    do = _flip
-    undo = _flip
-
-
-class SetGeoPathSurfaceCommand(Command):
-    """Set the terrain-surface mode (None/"flat"/"draped") on georef paths.
-
-    A surface implies a closed polygon, so this also closes the path; undo
-    restores the prior mode and closed flag. Built triangles are recomputed
-    outside (they depend on the DEM), so they're just cleared here.
-    """
-
-    def __init__(self, paths, mode) -> None:
-        self.mode = mode
-        self._paths = list(paths)
-        self._prev: list = []
-
-    def do(self, scene) -> None:
-        self._prev = [(p, p.surface, p.closed) for p in self._paths]
-        for p in self._paths:
-            p.surface = self.mode
-            if self.mode:
-                p.closed = True
-            p._surface_tris = None
-        scene.version += 1
-
-    def undo(self, scene) -> None:
-        for p, surface, closed in self._prev:
-            p.surface = surface
-            p.closed = closed
-            p._surface_tris = None
-        scene.version += 1
-
-
-class MoveGeoPathNodeCommand(Command):
-    """Move one node of a georef path to a new position (undoable)."""
-
-    def __init__(self, path, index, new_point) -> None:
-        from PySide6.QtGui import QVector3D
-        self.path = path
-        self.index = index
-        self._new = QVector3D(new_point)
-        self._old = None
-
-    def do(self, scene) -> None:
-        from PySide6.QtGui import QVector3D
-        self._old = QVector3D(self.path.points[self.index])
-        self.path.points[self.index] = QVector3D(self._new)
-        scene.version += 1
-
-    def undo(self, scene) -> None:
-        from PySide6.QtGui import QVector3D
-        self.path.points[self.index] = QVector3D(self._old)
-        scene.version += 1
 
 
 class SetFaceTextureCommand(Command):
@@ -2982,7 +2516,6 @@ class SnapshotImport(Command):
         self.after: Optional[dict] = None
         self.added_groups: list = []
         self.added_layers: list = []
-        self.added_views: list = []
         self.added_dims: list = []
         self.added_texts: list = []
 
@@ -2991,7 +2524,6 @@ class SnapshotImport(Command):
         if self.after is None:
             groups_before = list(scene.groups)
             layers_before = list(scene.layers)
-            views_before = list(scene.saved_views)
             dims_before = list(scene.dimensions)
             texts_before = list(scene.text_labels)
             self.before = m.capture_state()
@@ -3000,14 +2532,12 @@ class SnapshotImport(Command):
             except BaseException:
                 # History.execute restores the mesh, but a loader or AI
                 # recipe that fails halfway has already appended groups
-                # (extrude/revolve land one per call), layers, views,
+                # (extrude/revolve land one per call), layers,
                 # dimensions or labels — leave none of them behind.
                 scene.groups[:] = [g for g in scene.groups
                                    if g in groups_before]
                 scene.layers[:] = [ly for ly in scene.layers
                                    if ly in layers_before]
-                scene.saved_views[:] = [v for v in scene.saved_views
-                                        if v in views_before]
                 scene.dimensions[:] = [d for d in scene.dimensions
                                        if d in dims_before]
                 scene.text_labels[:] = [t for t in scene.text_labels
@@ -3018,8 +2548,6 @@ class SnapshotImport(Command):
                                  if g not in groups_before]
             self.added_layers = [ly for ly in scene.layers
                                  if ly not in layers_before]
-            self.added_views = [v for v in scene.saved_views
-                                if v not in views_before]
             self.added_dims = [d for d in scene.dimensions
                                if d not in dims_before]
             self.added_texts = [t for t in scene.text_labels
@@ -3032,9 +2560,6 @@ class SnapshotImport(Command):
             for ly in self.added_layers:
                 if ly not in scene.layers:
                     scene.layers.append(ly)
-            for v in self.added_views:
-                if v not in scene.saved_views:
-                    scene.saved_views.append(v)
             for d in self.added_dims:
                 if d not in scene.dimensions:
                     scene.dimensions.append(d)
@@ -3053,9 +2578,6 @@ class SnapshotImport(Command):
         for ly in self.added_layers:
             if ly in scene.layers:
                 scene.layers.remove(ly)
-        for v in self.added_views:
-            if v in scene.saved_views:
-                scene.saved_views.remove(v)
         for d in self.added_dims:
             if d in scene.dimensions:
                 scene.dimensions.remove(d)
@@ -3366,7 +2888,7 @@ class ReplaceComponentCommand(Command):
     not a component instance, are left alone."""
 
     _SHARED = ("mesh", "children", "name", "axes", "component", "text3d",
-               "ifc", "ext", "billboard", "exploded")
+               "ext", "billboard", "exploded")
 
     def __init__(self, targets, source) -> None:
         self.source = source
@@ -3392,7 +2914,6 @@ class ReplaceComponentCommand(Command):
             g.axes = QMatrix4x4(src.axes) if src.axes is not None else None
             g.component = True
             g.text3d = dict(src.text3d) if src.text3d else None
-            g.ifc = dict(src.ifc) if src.ifc else None
             g.ext = copy.deepcopy(src.ext) if src.ext else None
             g.billboard = src.billboard
             g.exploded = dict(src.exploded) if src.exploded else None
@@ -4074,157 +3595,6 @@ def placement_is_identity(xform, tol: float = 1e-6) -> bool:
                for r in range(4) for c in range(4))
 
 
-def placement_rotation_deg(xform) -> float:
-    """Turn about Z (degrees, counter-clockwise seen from above) of a rigid
-    placement; raises ``ValueError`` when the placement tilts or scales —
-    there is no north angle for those."""
-    import math
-    c0, c1, c2 = xform.column(0), xform.column(1), xform.column(2)
-    if (abs(c2.x()) > 1e-6 or abs(c2.y()) > 1e-6 or abs(c2.z() - 1.0) > 1e-6
-            or abs(c0.z()) > 1e-6 or abs(c1.z()) > 1e-6):
-        raise ValueError("the model is tilted (its Z axis is not vertical)")
-    sx = math.hypot(c0.x(), c0.y())
-    sy = math.hypot(c1.x(), c1.y())
-    if abs(sx - 1.0) > 1e-4 or abs(sy - 1.0) > 1e-4:
-        raise ValueError("the model is scaled")
-    return math.degrees(math.atan2(c0.y(), c0.x()))
-
-
-class StraightenModelCommand(Command):
-    """Put a model that was turned and dragged onto its site back on its
-    own axes, and turn the MAP under it instead (a north angle).
-
-    ``group`` is the placed model: a top-level instance whose ``xform`` is a
-    turn about Z plus a translation. The command applies the inverse of that
-    placement to EVERYTHING in the scene — every group, loose geometry,
-    annotations, guides, section planes, geo data, saved views, sheet
-    frames and anchored cotas — so the group's placement becomes identity
-    and nothing moves relative to anything else; then it re-anchors the
-    datum so the base map, terrain and imports stay where they were under
-    the model: the anchor becomes the group's origin and the north angle
-    grows by the group's turn. Front/right/top views, axis locks and the
-    rectangle tool are square to the model again.
-
-    The vertical part of the placement is dropped: the model returns to
-    the heights it was drawn at and the map keeps z = 0 (the reference
-    plane) — the only place a flat map can be.
-    """
-
-    def __init__(self, group: Group) -> None:
-        self.group = group
-        self.degrees: float = 0.0
-        self._placement = None          # the group's xform before do()
-        self._old_datum = None
-        self._new_datum = None
-        self._snaps: dict = {}          # id(mesh) → (before, after)
-        self._terrain = None
-
-    def do(self, scene) -> None:
-        if self.group not in scene.groups or self.group.xform is None:
-            raise ValueError("pick a placed component at the top level")
-        datum = getattr(scene, "georef", None)
-        if datum is None:
-            raise ValueError("the scene has no location yet")
-        if self._placement is None:
-            from PySide6.QtGui import QMatrix4x4
-            from georef.datum import SceneDatum
-            self.degrees = placement_rotation_deg(self.group.xform)
-            self._placement = QMatrix4x4(self.group.xform)
-            self._old_datum = datum
-            t = self._placement.column(3)
-            lat, lon, _ = datum.local_to_geodetic(QVector3D(t.x(), t.y(), 0.0))
-            self._new_datum = SceneDatum(lat, lon, alt=datum.alt,
-                                         north=datum.north + self.degrees)
-        w, ok = self._placement.inverted()
-        if not ok:
-            raise ValueError("the placement is not invertible")
-        self._apply(scene, w, -self.degrees, redo=True)
-        from PySide6.QtGui import QMatrix4x4
-        self.group.xform = QMatrix4x4()     # exactly on its axes, no float dust
-        scene.georef = self._new_datum
-        self._terrain = getattr(scene, "terrain", None)
-        scene.terrain = None            # display-only; rebuilt from the datum
-
-    def undo(self, scene) -> None:
-        self._apply(scene, self._placement, self.degrees, redo=False)
-        from PySide6.QtGui import QMatrix4x4
-        self.group.xform = QMatrix4x4(self._placement)
-        scene.georef = self._old_datum
-        scene.terrain = self._terrain
-
-    # ---- The rigid transform -----------------------------------------------
-    def _apply(self, scene, m, turn_deg: float, redo: bool) -> None:
-        """Move everything by the rigid ``m`` (``turn_deg`` is its turn about
-        Z, for the cameras)."""
-        import math
-
-        def pt(v):
-            return m.map(QVector3D(*v) if isinstance(v, (list, tuple))
-                         else QVector3D(v))
-
-        def vec(v):
-            return m.mapVector(QVector3D(v))
-
-        for g in scene.groups:
-            if g.xform is not None:          # instances compose — O(1)
-                g.xform = m * g.xform
-            else:
-                self._transform_mesh(g.mesh, m, redo)
-        self._transform_mesh(scene.mesh, m, redo)
-        for d in scene.dimensions:
-            d.a, d.b, d.offset = pt(d.a), pt(d.b), vec(d.offset)
-        for t in scene.text_labels:
-            t.anchor, t.offset = pt(t.anchor), vec(t.offset)
-        for gd in scene.guides:
-            gd.point = pt(gd.point)
-            if getattr(gd, "direction", None) is not None:
-                gd.direction = vec(gd.direction)
-        for sp in scene.section_planes:
-            sp.point, sp.normal = pt(sp.point), vec(sp.normal)
-        for im in scene.image_planes:
-            im.origin, im.u, im.v = pt(im.origin), vec(im.u), vec(im.v)
-        for gp in scene.geo_paths:
-            gp.points = [pt(q) for q in gp.points]
-            if getattr(gp, "_surface_tris", None) is not None:
-                gp._surface_tris = None
-        for gpt in scene.geo_points:
-            gpt.position = pt(gpt.position)
-        turn = math.radians(turn_deg)
-        for sv in scene.saved_views:
-            q = pt(sv.target)
-            sv.target = (q.x(), q.y(), q.z())
-            sv.yaw = sv.yaw + turn
-        for comp in scene.compositions:
-            for it in comp.all_items():
-                for attr in ("a_world", "b_world"):
-                    w = getattr(it, attr, None)
-                    if w:
-                        q = pt(w)
-                        setattr(it, attr, [q.x(), q.y(), q.z()])
-                ct = getattr(it, "cam_target", None)
-                if ct:
-                    q = pt(ct)
-                    it.cam_target = [q.x(), q.y(), q.z()]
-                    if getattr(it, "cam_yaw", None) is not None:
-                        it.cam_yaw = it.cam_yaw + turn
-        scene.version += 1
-
-    def _transform_mesh(self, mesh, m, redo: bool) -> None:
-        """Classic (world-coordinate) meshes: move the vertices the first
-        time, snapshot both states, and replay the snapshots after that so
-        undo/redo are exact."""
-        from core.group import _remap_uvws
-        if not mesh.vertices:
-            return
-        snap = self._snaps.get(id(mesh))
-        if snap is not None:
-            mesh.restore_state(snap[1] if redo else snap[0])
-            return
-        before = mesh.capture_state()
-        for v in list(mesh.vertices):
-            mesh.move_vertex(v, m.map(v.position) - v.position)
-        _remap_uvws(mesh, m)
-        self._snaps[id(mesh)] = (before, mesh.capture_state())
 
 
 def group_owner_list(scene, group):

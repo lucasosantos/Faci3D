@@ -460,8 +460,8 @@ def _example_entries() -> list[tuple[Path, str, str, str]]:
 
 
 def _example_screenshot(path: Path) -> str | None:
-    """The preview shipped beside an example: ``windowizer.png`` next to
-    ``windowizer.py``, or ``screenshot.png`` inside a package."""
+    """The preview shipped beside an example: ``my_tool.png`` next to
+    ``my_tool.py``, or ``screenshot.png`` inside a package."""
     folder, stem = ((path, "screenshot") if path.is_dir()
                     else (path.parent, path.stem))
     for suffix in (".png", ".jpg", ".jpeg", ".webp"):

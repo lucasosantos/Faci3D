@@ -91,8 +91,10 @@ def test_the_base_face_is_gone_not_left_underneath():
     ring = next(f for f in scene.mesh.faces if f.holes)
     inner = next(f for f in scene.mesh.faces if not f.holes)
     # Ring + inner tile the original exactly: no overlap, nothing missing.
-    from core.bim import face_net_area
-    assert round(face_net_area(ring) + face_net_area(inner), 6) == 60.0
+    def net_area(f):
+        return sum(QVector3D.crossProduct(b - a, c - a).length() / 2.0
+                   for a, b, c in f.triangulate())
+    assert round(net_area(ring) + net_area(inner), 6) == 60.0
 
 
 def test_undo_puts_the_painted_face_back():

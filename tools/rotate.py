@@ -63,7 +63,6 @@ class RotateTool(ProtractorBase):
     def __init__(self) -> None:
         super().__init__()
         self._groups: list[Group] = []
-        self._splanes: list = []               # section planes being rotated
         self._images: list = []                # reference images being rotated
         self._positions: list[QVector3D] = []
         self._verts: list = []
@@ -139,26 +138,13 @@ class RotateTool(ProtractorBase):
         self._last = None            # a click ends the retype window
         if self.start_point is None:
             groups, positions = gather_targets(ctx)
-            from core.section import SectionPlane
-            splanes = [p for p in viewport.scene.selection
-                       if isinstance(p, SectionPlane)]
-            if not splanes and not viewport.scene.selection:
-                # Rotate grabs a section plane directly by its
-                # frame, no pre-selection needed.
-                pick = getattr(viewport, "pick_section_plane", None)
-                sp = (pick(ctx.screen.x(), ctx.screen.y())
-                      if pick is not None else None)
-                if sp is not None:
-                    splanes = [sp]
-                    groups, positions = [], []
             from tools.move import gather_images
             images = gather_images(ctx)
-            if not (groups or positions or splanes or images):
+            if not (groups or positions or images):
                 viewport.flash_status(
                     tr("Select (or click) the geometry to rotate first"))
                 return
             self._groups = groups
-            self._splanes = splanes
             self._images = images
             self._positions = positions
             mesh = viewport.scene.mesh
@@ -417,7 +403,7 @@ class RotateTool(ProtractorBase):
         if snap is not None:
             return snap
         from PySide6.QtGui import QMatrix4x4
-        snap = {"xf": [], "gv": [], "v": [], "sp": [], "im": []}
+        snap = {"xf": [], "gv": [], "v": [], "im": []}
         vp_only = getattr(self, "_vp_preview", False)
         if not vp_only:
             for group in self._groups:
@@ -427,8 +413,6 @@ class RotateTool(ProtractorBase):
                     snap["gv"].extend((group.mesh, vx, QVector3D(vx.position))
                                       for vx in list(group.mesh.vertices))
             snap["v"] = [(vx, QVector3D(vx.position)) for vx in self._verts]
-        snap["sp"] = [(sp, QVector3D(sp.point), QVector3D(sp.normal))
-                      for sp in self._splanes]
         snap["im"] = [(im, QVector3D(im.origin), QVector3D(im.u),
                        QVector3D(im.v)) for im in self._images]
         self._orig = snap
@@ -445,10 +429,6 @@ class RotateTool(ProtractorBase):
         for vx, pos in snap["v"]:
             viewport.scene.mesh.place_vertex(
                 vx, m.map(pos) if m is not None else pos)
-        for sp, point, normal in snap["sp"]:
-            sp.point = m.map(point) if m is not None else QVector3D(point)
-            n2 = m.mapVector(normal) if m is not None else QVector3D(normal)
-            sp.normal = n2.normalized() if n2.length() > 1e-12 else normal
         for im, origin, u, v in snap["im"]:
             im.origin = m.map(origin) if m is not None else QVector3D(origin)
             im.u = m.mapVector(u) if m is not None else QVector3D(u)
@@ -486,7 +466,6 @@ class RotateTool(ProtractorBase):
         axis = QVector3D(self._axis())
         copy = self._copy
         groups = list(self._groups)
-        splanes = list(self._splanes)
         images = list(self._images)
         positions = list(self._positions)
         faces = list(self._sel_faces)
@@ -533,10 +512,6 @@ class RotateTool(ProtractorBase):
                 if positions:
                     cmds.append(RotateVerticesCommand(
                         positions, start, axis, deg))
-                if splanes:
-                    from core.history import RotateSectionPlanesCommand
-                    cmds.append(RotateSectionPlanesCommand(
-                        splanes, start, axis, deg))
                 if images:
                     from core.history import RotateImagePlanesCommand
                     cmds.append(RotateImagePlanesCommand(
@@ -571,7 +546,6 @@ class RotateTool(ProtractorBase):
     def _reset(self) -> None:
         self._reset_protractor()
         self._groups = []
-        self._splanes = []
         self._images = []
         self._positions = []
         self._verts = []

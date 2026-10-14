@@ -206,7 +206,6 @@ class _Bridge(QObject):
             "materials": sorted(getattr(scene, "materials", {}) or {})[:100],
             "layers": [ly.name for ly in scene.layers],
             "dimensions": len(getattr(scene, "dimensions", []) or []),
-            "section_planes": len(getattr(scene, "section_planes", []) or []),
             "selection": len(scene.selection),
             "bounds": (None if lo is None else
                        {"min": [lo.x(), lo.y(), lo.z()],

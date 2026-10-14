@@ -357,70 +357,10 @@ def test_the_real_box_is_fitted_to_the_modelling_area(ventana,
     box.close()
 
 
-# ---- the sheet composer ----------------------------------------------------------
-def _composer(win):
-    vp = win.viewport
-    if getattr(vp, "_gl", None) is None or not vp.isValid():
-        pytest.skip("no OpenGL here: the composer renders its views")
-    comp = win._ensure_composer()
-    comp.show()
-    QApplication.processEvents()
-    return comp
-
-
-def test_f3_works_in_the_composer_with_its_own_commands(ventana):
-    comp = _composer(ventana)
-    QTest.keyClick(comp, Qt.Key_F1)                  # the warm-up keystroke
-    QTest.keyClick(comp, Qt.Key_F3)
-    QApplication.processEvents()
-    box = getattr(comp, "_command_search", None)
-    assert box is not None and box.isVisible()
-    names = [c.name for c in box._pool]
-    assert "Chain dimension" in names and "Orient Faces" not in names
-    box.close()
-    comp.close()
-
-
-def test_the_main_window_does_not_list_the_composers_commands(ventana):
-    _composer(ventana).close()
-    names = _names(ventana, "")
-    assert "Chain dimension" not in names and "Ungroup" not in names
-    assert "Orient Faces" in names
-
-
-def test_a_composer_tool_has_a_short_name_and_its_sentence_as_tip(ventana):
-    comp = _composer(ventana)
-    act = comp._tool_actions["cota_cadena"]
-    assert act.text() == "Chain dimension"
-    assert act.toolTip().startswith("Chain dimensions the way AutoCAD")
-    cmd = next(c for c in cs.commands(comp) if c.action is act)
-    assert cmd.path == "Draw"                       # its toolbar
-    comp.close()
-
-
-def test_keys_written_in_the_name_go_to_their_column(ventana):
-    comp = _composer(ventana)
-    cmd = next(c for c in cs.commands(comp) if c.name == "Ungroup")
-    assert cmd.keys == "Ctrl+Shift+G"
-    # Brackets that are not keys stay in the name.
-    for text in ("AI Bridge (MCP)", "Português (Brasil)", "IFC (BIM)…",
+def test_brackets_that_are_not_keys_stay_in_the_name():
+    for text in ("AI Bridge (MCP)", "Português (Brasil)", "SVG drawing (.svg)…",
                  "Rebuild Faces (Planar)"):
         assert cs._keys_in(text) is None, text
-    comp.close()
-
-
-def test_the_composer_box_opens_over_the_sheet_not_the_panel(ventana,
-                                                             monkeypatch):
-    comp = _composer(ventana)
-    seen = []
-    monkeypatch.setattr(cs, "fit_box",
-                        lambda c, size, e, work, screen: seen.append(work)
-                        or QRect(work.topLeft(), size))
-    QApplication.processEvents()
-    area = comp.command_search_area()
-    cs.open_search(comp).close()
-    assert seen == [QRect(area.mapToGlobal(QPoint(0, 0)), area.size())]
-    comp.close()
 
 
 # ---- the explanation on hover (Blender's tooltip) --------------------------------
@@ -434,16 +374,6 @@ def test_the_description_drops_the_name_and_keys_a_tooltip_repeats():
     act.setText("Pan")
     act.setToolTip("Pan the sheet (or drag with the middle button)")
     assert cs.Command(act, "").tip.startswith("Pan the sheet")
-
-
-def test_the_tooltip_is_name_description_and_keys_wrapped(ventana):
-    comp = _composer(ventana)
-    cmd = next(c for c in cs.commands(comp) if c.name == "Chain dimension")
-    tip = cs.tooltip_html(cmd)
-    assert "<b>Chain dimension</b>" in tip
-    assert "every click adds the next cota" in tip
-    assert "<table width=" in tip                  # long: wrapped, not cut
-    comp.close()
 
 
 def test_a_command_run_from_f3_is_the_one_shift_r_repeats(ventana):
@@ -522,13 +452,10 @@ def test_warm_up_makes_no_native_popup_ahead_of_f3(ventana, monkeypatch,
 
 
 def test_every_command_says_what_it_does(ventana):
-    """Blender explains every command on hover; so do both windows."""
-    comp = _composer(ventana)
-    for win in (ventana, comp):
-        bare = [c.name for c in cs.commands(win)
-                if not c.tip and c.action.isEnabled()]
-        assert bare == [], bare
-    comp.close()
+    """Blender explains every command on hover; so does the window."""
+    bare = [c.name for c in cs.commands(ventana)
+            if not c.tip and c.action.isEnabled()]
+    assert bare == [], bare
 
 
 def test_a_toolbar_button_shows_its_description_under_name_and_keys(

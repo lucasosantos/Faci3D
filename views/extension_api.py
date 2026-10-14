@@ -49,7 +49,7 @@ API_VERSION = 2
 #: ``file_openers`` first — it's the extension's own opener that would
 #: silently steal Open Recent / CLI / double-click from the core reader.
 CORE_FILE_SUFFIXES = frozenset({
-    ".igz", ".dae", ".skp", ".dxf", ".dwg", ".obj", ".stl", ".glb",
+    ".faci3d", ".igz", ".dae", ".skp", ".obj", ".stl", ".glb", ".svg",
 })
 
 
@@ -307,8 +307,8 @@ class ExtensionApp:
         ``fn(path)``, which returns True when it opened the document.
 
         Refused, with a warning logged, for one of the core's own suffixes
-        (:data:`CORE_FILE_SUFFIXES` — ``.igz``, ``.dae``, ``.skp``, ``.dxf``,
-        ``.dwg``, ``.obj``, ``.stl``, ``.glb``) or one an earlier extension
+        (:data:`CORE_FILE_SUFFIXES` — ``.faci3d``, ``.igz``, ``.dae``,
+        ``.skp``, ``.obj``, ``.stl``, ``.glb``, ``.svg``) or one an earlier extension
         already claimed: :meth:`views.main_window.MainWindow.open_path`
         consults ``file_openers`` before anything else, so a claim that
         went through would silently steal that suffix from its rightful

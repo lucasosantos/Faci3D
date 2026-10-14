@@ -27,7 +27,7 @@ from __future__ import annotations
 #: What is bound in the execution scope. Same names through both doors.
 SCOPE = (
     "En el scope tienes: scene, mesh, selection, groups, layers, "
-    "viewport, QVector3D, Mesh, Group, Edge, Face, bim.")
+    "viewport, QVector3D, Mesh, Group, Edge, Face.")
 
 #: The one-line builders. Hand-rolling these is the single biggest waste of
 #: turns we have measured — every model that was not told reinvented a

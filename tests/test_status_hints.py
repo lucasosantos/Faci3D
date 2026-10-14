@@ -58,14 +58,9 @@ def test_every_registered_tool_has_a_hint():
     assert win.statusBar().currentMessage().startswith("Line — Click the start point")
     win._activate_nav("orbit")
     assert win.status_hint.startswith("Orbit — Drag to orbit")
-    # The Model | Sheet strip stays first: no normal widget was added left of it.
-    from views.sheet_tabs import SheetTabs
     bar = win.statusBar()
-    kids = [w for w in bar.findChildren(SheetTabs)]
     win.show()
     app.processEvents()
-    tabs = kids[0]
-    assert tabs.x() <= bar._msg.x()            # the strip, then the hint
     # A timed message covers the hint and the hint comes back.
     win.viewport.flash_status("Guide at 2.2 m", 50)
     assert bar.currentMessage().startswith("Guide at")
@@ -82,15 +77,15 @@ def test_the_message_keeps_to_its_share_of_the_bar():
         app = QApplication([])
     elif not isinstance(app, QApplication):
         pytest.skip("another Qt application flavour is already running")
-    from views.sheet_tabs import SheetStatusBar
-    bar = SheetStatusBar(None, on_model=lambda: None, on_sheet=lambda i: None)
+    from views.status_bar import StatusBar
+    bar = StatusBar(None)
     bar.show()
     bar.resize(1600, 28)
     app.processEvents()
     assert bar._msg.maximumWidth() == int(1600 * bar.MESSAGE_SHARE)
     bar.showMessage("Select objects.")
     app.processEvents()
-    assert bar._msg.x() < 200                   # glued to the left, after the strip
+    assert bar._msg.x() < 200                   # glued to the left
     assert bar._msg.width() >= 700
     bar.resize(200, 28)
     app.processEvents()

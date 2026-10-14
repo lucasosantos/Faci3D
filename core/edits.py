@@ -397,20 +397,6 @@ def _append_face_plane_rebuild(scene, commands, points) -> None:
             return
 
 
-def _append_active_tag(scene, commands) -> None:
-    """Tag-as-you-draw: when the BIM active class is set, append the step that
-    stamps it on the plan's own drawn faces. Inserted BEFORE the plane
-    rebuilds, so a rebuild that replaces the drawn face inherits the tag
-    per-region (A.3) instead of losing the reference."""
-    tag = getattr(scene, "active_ifc", None)
-    if not tag:
-        return
-    from core.history import AutoTagDrawnFacesCommand
-    face_cmds = [c for c in commands
-                 if isinstance(c, AddFaceCommand) and c.auto]
-    if face_cmds:
-        commands.append(AutoTagDrawnFacesCommand(face_cmds, tag))
-
 
 def _newell(loop) -> QVector3D:
     nx = ny = nz = 0.0
@@ -456,7 +442,6 @@ def build_add_edge(scene, a: QVector3D, b: QVector3D, detect_faces: bool = True,
     """Single-segment convenience: one drawn edge → one atomic command."""
     commands = plan_edge_commands(scene, [(a, b)], detect_faces=detect_faces,
                                   eye=eye)
-    _append_active_tag(scene, commands)
     _append_flat_curve_rebuild(scene, commands, [a, b])
     if detect_faces:
         _append_face_plane_rebuild(scene, commands, [a, b])
@@ -484,7 +469,6 @@ def build_add_edges(
     commands = plan_edge_commands(scene, segments, detect_faces=detect_faces,
                                   eye=eye)
     commands.extend(extra)
-    _append_active_tag(scene, commands)
     _append_flat_curve_rebuild(
         scene, commands, [p for seg in segments for p in seg])
     if len(commands) == 1 and not _scene_has_curves(scene):

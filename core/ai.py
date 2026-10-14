@@ -42,14 +42,13 @@ USER_AGENT = _UA
 def build_scope(viewport, scope: dict | None = None) -> dict:
     """(Re)bind the live objects an agent scripts against."""
     from PySide6.QtGui import QVector3D
-    from core import bim
     from core.group import Group
     from core.mesh import Edge, Face, Mesh, Vertex
     scope = scope if scope is not None else {"__name__": "__ai__"}
     scope.update(
         viewport=viewport, scene=viewport.scene, model=viewport.scene,
         mesh=viewport.scene.mesh, selection=viewport.scene.selection,
-        groups=viewport.scene.groups, layers=viewport.scene.layers, bim=bim,
+        groups=viewport.scene.groups, layers=viewport.scene.layers,
         QVector3D=QVector3D, Mesh=Mesh, Group=Group, Vertex=Vertex,
         Edge=Edge, Face=Face)
     scope.update(_recipe_helpers(viewport.scene))

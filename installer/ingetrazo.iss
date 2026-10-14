@@ -74,22 +74,26 @@ Name: "polish"; MessagesFile: "compiler:Languages\Polish.isl"
 [CustomMessages]
 english.SkpDefault=Open .skp files with Faci3D (double-click)
 english.FileAssociations=File associations:
-english.IgzDocument=Faci3D document
+english.IgzDocument=Faci3D project
+english.LegacyDocument=IngeTrazo document (Faci3D)
 english.DaeModel=COLLADA model (Faci3D)
 english.SkpModel=SKP model (Faci3D)
 spanish.SkpDefault=Abrir archivos .skp con Faci3D (doble clic)
 spanish.FileAssociations=Asociaciones de archivos:
-spanish.IgzDocument=Documento de Faci3D
+spanish.IgzDocument=Proyecto de Faci3D
+spanish.LegacyDocument=Documento de IngeTrazo (Faci3D)
 spanish.DaeModel=Modelo COLLADA (Faci3D)
 spanish.SkpModel=Modelo SKP (Faci3D)
 brazilianportuguese.SkpDefault=Abrir arquivos .skp com o Faci3D (clique duplo)
 brazilianportuguese.FileAssociations=Associações de arquivos:
-brazilianportuguese.IgzDocument=Documento do Faci3D
+brazilianportuguese.IgzDocument=Projeto do Faci3D
+brazilianportuguese.LegacyDocument=Documento do IngeTrazo (Faci3D)
 brazilianportuguese.DaeModel=Modelo COLLADA (Faci3D)
 brazilianportuguese.SkpModel=Modelo SKP (Faci3D)
 polish.SkpDefault=Otwieraj pliki .skp w Faci3D (dwukrotne kliknięcie)
 polish.FileAssociations=Skojarzenia plików:
-polish.IgzDocument=Dokument Faci3D
+polish.IgzDocument=Projekt Faci3D
+polish.LegacyDocument=Dokument IngeTrazo (Faci3D)
 polish.DaeModel=Model COLLADA (Faci3D)
 polish.SkpModel=Model SKP (Faci3D)
 
@@ -127,9 +131,9 @@ Root: HKCU; Subkey: "Software\Microsoft\DirectX\UserGpuPreferences"; \
     ValueType: string; ValueName: "{app}\{#MyAppExeName}"; \
     ValueData: "GpuPreference=2;"; Flags: createvalueifdoesntexist uninsdeletevalue
 
-; ── .igz — Faci3D's own format: full association + branded document icon ──
-; Double-click opens the document in Faci3D and Explorer shows the .igz icon.
-Root: HKA; Subkey: "Software\Classes\.igz"; ValueType: string; \
+; ── .faci3d — Faci3D's own format: full association + document icon ───────
+; Double-click opens the project in Faci3D and Explorer shows its icon.
+Root: HKA; Subkey: "Software\Classes\.faci3d"; ValueType: string; \
     ValueData: "Faci3D.Document"; Flags: uninsdeletevalue
 Root: HKA; Subkey: "Software\Classes\Faci3D.Document"; ValueType: string; \
     ValueData: "{cm:IgzDocument}"; Flags: uninsdeletekey
@@ -137,6 +141,19 @@ Root: HKA; Subkey: "Software\Classes\Faci3D.Document\DefaultIcon"; \
     ValueType: string; ValueData: "{app}\ingetrazo-igz.ico,0"
 Root: HKA; Subkey: "Software\Classes\Faci3D.Document\shell\open\command"; \
     ValueType: string; ValueData: """{app}\{#MyAppExeName}"" ""%1"""
+
+; ── .igz — IngeTrazo's document: "Open with" only ───────────────────────────
+; It opens as a new unsaved project; double-click stays with IngeTrazo when
+; it is installed.
+Root: HKA; Subkey: "Software\Classes\Faci3D.igz"; ValueType: string; \
+    ValueData: "{cm:LegacyDocument}"; Flags: uninsdeletekey
+Root: HKA; Subkey: "Software\Classes\Faci3D.igz\DefaultIcon"; \
+    ValueType: string; ValueData: "{app}\ingetrazo-igz.ico,0"
+Root: HKA; Subkey: "Software\Classes\Faci3D.igz\shell\open\command"; \
+    ValueType: string; ValueData: """{app}\{#MyAppExeName}"" ""%1"""
+Root: HKA; Subkey: "Software\Classes\.igz\OpenWithProgids"; \
+    ValueType: string; ValueName: "Faci3D.igz"; ValueData: ""; \
+    Flags: uninsdeletevalue
 
 ; ── .dae / .skp — standard interchange formats: "Open with" only ────────────
 ; We DO NOT take over the default program or the file icon (Windows ties the

@@ -326,11 +326,7 @@ def _followme(p, ink):
 
 
 
-# ---- Sections: a square, the plane as a dashed accent line, the cut edge ----
-# Marco's pick (2026-09-14, the minimal family): the tool shows the plane
-# through a box with the arrow of the side that goes away; "planes" is the
-# bare frame with its corner brackets; "cuts" keeps the half that stays
-# with the cut edge thick in the accent; "fill" paints that cut face.
+# ---- A filled arrow, shared by the transform icons -------------------------
 
 def _solid_arrow(p, color, x0, y0, x1, y1, w=2.8, head=6.0):
     dx, dy = x1 - x0, y1 - y0
@@ -351,65 +347,10 @@ def _solid_arrow(p, color, x0, y0, x1, y1, w=2.8, head=6.0):
     p.restore()
 
 
-_SECTION_FRAME = [QPointF(9, 30), QPointF(26, 39), QPointF(39, 21), QPointF(22, 12)]
 
 
-def _section(p, ink):
-    p.setBrush(Qt.NoBrush)
-    p.drawRect(QRectF(9, 13, 30, 22))
-    pen = QPen(_accent(), 3.0, Qt.DashLine)
-    pen.setCapStyle(Qt.RoundCap)
-    p.save()
-    p.setPen(pen)
-    p.drawLine(QPointF(24, 6), QPointF(24, 42))            # the plane
-    p.restore()
-    _solid_arrow(p, _accent(), 28, 9, 38, 9)                # the side cut away
 
 
-def _section_planes(p, ink):
-    quad = QPolygonF(_SECTION_FRAME)
-    dash = QPen(QColor(ink.red(), ink.green(), ink.blue(), 110), 1.8,
-                Qt.DashLine)
-    p.save()
-    p.setPen(dash)
-    p.setBrush(Qt.NoBrush)
-    p.drawPolygon(quad)
-    p.restore()
-    pen = QPen(ink, 3.0)
-    pen.setCapStyle(Qt.RoundCap)
-    p.save()
-    p.setPen(pen)
-    pts = _SECTION_FRAME
-    for i, c in enumerate(pts):                            # corner brackets
-        for j in (1, -1):
-            n = pts[(i + j) % 4]
-            dx, dy = n.x() - c.x(), n.y() - c.y()
-            L = math.hypot(dx, dy) or 1.0
-            p.drawLine(c, QPointF(c.x() + dx * 7.0 / L, c.y() + dy * 7.0 / L))
-    p.restore()
-
-
-def _section_cuts(p, ink):
-    p.setBrush(Qt.NoBrush)
-    p.drawLine(QPointF(24, 13), QPointF(39, 13))
-    p.drawLine(QPointF(39, 13), QPointF(39, 35))
-    p.drawLine(QPointF(39, 35), QPointF(24, 35))
-    pen = QPen(_accent(), 4.0)
-    pen.setCapStyle(Qt.RoundCap)
-    p.save()
-    p.setPen(pen)
-    p.drawLine(QPointF(24, 13), QPointF(24, 35))            # the cut edge
-    p.restore()
-
-
-def _section_fill(p, ink):
-    _section_cuts(p, ink)
-    acc = _accent()
-    p.save()
-    p.setPen(Qt.NoPen)
-    p.setBrush(QColor(acc.red(), acc.green(), acc.blue(), 150))
-    p.drawRect(QRectF(24, 13, 15, 22))                     # the cut face
-    p.restore()
 
 
 def _protractor(p, ink):
@@ -619,24 +560,6 @@ def _dimension(p, ink):
     _dot(p, B[0], B[1], 2.9)
 
 
-def _dimension_style(p, ink):
-    # The Dimension-style panel: a dimension with a brush over it (the
-    # look of the cotas), so it no longer reads as the Dimension tool
-    # (Marco's pick, 2026-09-14).
-    p.drawLine(QPointF(9, 36), QPointF(39, 36))
-    p.drawLine(QPointF(9, 30), QPointF(9, 42))
-    p.drawLine(QPointF(39, 30), QPointF(39, 42))
-    p.save()
-    pen = QPen(ink, 3.0)
-    pen.setCapStyle(Qt.RoundCap)
-    p.setPen(pen)
-    p.drawLine(QPointF(40, 8), QPointF(28, 20))            # handle
-    p.setPen(Qt.NoPen)
-    p.setBrush(QBrush(_accent()))
-    p.drawPolygon(QPolygonF([QPointF(29, 18), QPointF(31, 22),
-                             QPointF(25, 26), QPointF(22, 23)]))   # bristles
-    p.restore()
-
 
 def _dimension_chain(p, ink):
     # Two dimension segments sharing one line, the total stacked above —
@@ -730,17 +653,6 @@ def _dimension_baseline(p, ink):
     for x in (22.0, 31.0, 40.0):
         _dot(p, x, 40.0, 2.2)
 
-
-def _geopath(p, ink):
-    pen = p.pen()
-    pen.setStyle(Qt.DashLine)
-    p.setPen(pen)
-    p.drawPolyline(QPolygonF([QPointF(11, 34), QPointF(20, 16),
-                              QPointF(30, 30), QPointF(38, 14)]))
-    pen.setStyle(Qt.SolidLine)
-    p.setPen(pen)
-    for x, y in ((11, 34), (20, 16), (30, 30), (38, 14)):
-        _dot(p, x, y, 2.8)
 
 
 def _undo(p, ink):
@@ -1145,19 +1057,6 @@ def _proj_perspective(p, ink):
          top=QPointF(24, 10))
 
 
-def _proj_two_point(p, ink):
-    # the horizon and its two vanishing points
-    p.save()
-    p.setPen(_rpen(ink, 1.6))
-    p.drawLine(QPointF(3, 24), QPointF(45, 24))
-    p.restore()
-    _dot(p, 3.5, 24, r=2.6)
-    _dot(p, 44.5, 24, r=2.6)
-    _box(p, ink,
-         (QPointF(13, 18), QPointF(13, 30.5)),
-         (QPointF(24, 11), QPointF(24, 38)),
-         (QPointF(35, 18), QPointF(35, 30.5)))
-
 
 def _text(p, ink):
     # Text: a capital T inside a text frame (dashed), with the insertion
@@ -1358,27 +1257,6 @@ def _styles_icon(p, ink):
     p.restore()
 
 
-def _shadows_icon(p, ink):
-    # A block with its cast shadow, sun rays at the corner.
-    p.save()
-    p.setBrush(QColor(ink.red(), ink.green(), ink.blue(), 90))
-    p.setPen(Qt.NoPen)
-    p.drawPolygon(QPolygonF([QPointF(16, 36), QPointF(34, 36),
-                             QPointF(42, 42), QPointF(24, 42)]))
-    p.restore()
-    p.setBrush(Qt.NoBrush)
-    p.drawRect(QRectF(16, 20, 16, 16))
-    _dot(p, 12, 12, 4.0)
-    p.save()
-    pen = QPen(_accent(), 2.4)
-    pen.setCapStyle(Qt.RoundCap)
-    p.setPen(pen)
-    for ang in (200, 245, 290, 335):
-        a = math.radians(ang)
-        p.drawLine(QPointF(12 + 6.5 * math.cos(a), 12 + 6.5 * math.sin(a)),
-                   QPointF(12 + 10.5 * math.cos(a), 12 + 10.5 * math.sin(a)))
-    p.restore()
-
 
 # ---- Composer: Arrange (align / distribute / group / lock) -------------------
 # Two boxes and a reference line, in the same ink and accent as every other
@@ -1566,77 +1444,7 @@ def _disc(cx: float, cy: float, r: float) -> QPainterPath:
     return path
 
 
-def _position_camera(p, ink):
-    # Position Camera: a small camera, its lens in the accent, and under it
-    # an accent marker pointing down -- the camera goes where you click.
-    top = QPainterPath()
-    top.moveTo(15, 12)
-    top.lineTo(18, 7)
-    top.lineTo(28, 7)
-    top.lineTo(31, 12)
-    p.setPen(_rpen(ink, 2.6))
-    p.setBrush(Qt.NoBrush)
-    p.drawPath(top)
-    body = QPainterPath()
-    body.addRoundedRect(QRectF(7, 12, 32, 21), 3.5, 3.5)
-    p.setPen(_rpen(ink, 2.8))
-    p.drawPath(body)
-    acc = _accent()
-    p.setPen(_rpen(ink, 2.6))
-    p.setBrush(QColor(acc.red(), acc.green(), acc.blue(), 210))
-    p.drawEllipse(QPointF(23, 22.5), 6.2, 6.2)
-    p.setPen(Qt.NoPen)
-    p.setBrush(acc)
-    p.drawPolygon(QPolygonF([QPointF(18, 37), QPointF(28, 37),
-                             QPointF(23, 44)]))
 
-
-def _walk(p, ink):
-    # Walk: two footprints stepping forward up the icon, the leading one in
-    # the accent — the camera advances as you walk.
-    def foot(cx, cy, angle, colour):
-        p.save()
-        p.translate(cx, cy)
-        p.rotate(angle)
-        p.setPen(Qt.NoPen)
-        p.setBrush(colour)
-        p.drawEllipse(QRectF(-5.5, -10.0, 11.0, 15.0))     # sole
-        p.drawEllipse(QRectF(-4.2, 7.0, 8.4, 7.0))         # heel
-        p.restore()
-    foot(15.5, 30.0, -14, QBrush(ink))
-    foot(32.0, 17.0, -14, _accent())
-
-
-def _look_around(p, ink):
-    # Look Around: a head seen from above with its view cone, and a curved
-    # arrow sweeping round it — the view turns, the eye stays put.
-    acc = _accent()
-    cx, cy = 24.0, 30.0
-    cone = QPolygonF([QPointF(cx, cy), QPointF(cx - 12, 9), QPointF(cx + 12, 9)])
-    p.save()
-    p.setPen(Qt.NoPen)
-    p.setBrush(QColor(acc.red(), acc.green(), acc.blue(), 120))
-    p.drawPolygon(cone)
-    p.restore()
-    p.setPen(_rpen(ink, 2.8))
-    p.setBrush(Qt.NoBrush)
-    p.drawPath(_disc(cx, cy, 6.0))                       # the head
-    p.save()
-    p.setPen(Qt.NoPen)
-    p.setBrush(QBrush(ink))
-    p.drawPath(_disc(cx, cy - 6.5, 2.2))                 # the nose: facing up
-    p.restore()
-    arc = QRectF(cx - 14, cy - 14, 28, 28)
-    p.save()
-    p.setPen(_rpen(acc, 2.8))
-    p.drawArc(arc, 200 * 16, 140 * 16)                    # the sweep below
-    end = math.radians(340)
-    tip = QPointF(cx + 14 * math.cos(end), cy - 14 * math.sin(end))
-    p.setPen(Qt.NoPen)
-    p.setBrush(acc)
-    p.drawPolygon(QPolygonF([tip + QPointF(-1.5, -5.5), tip + QPointF(4.5, 1.5),
-                             tip + QPointF(-4.5, 2.5)]))
-    p.restore()
 
 
 # ---- Solid Tools: two overlapping discs ------------------------------------
@@ -1788,24 +1596,6 @@ def solid_cursor(state: str):
     return cur
 
 
-def _first_person(p, ink):
-    # First Person: the W/A/S/D keycaps as a game shows them, an inverted
-    # T, with W — walk forward — in the accent. Big caps and no legends:
-    # letters and anything smaller blur away at 24 px.
-    size, gap = 13.5, 2.5
-    x0 = 24.0 - size * 1.5 - gap
-    top = 24.0 - size - gap / 2.0
-    bottom = top + size + gap
-    caps = [(x0 + size + gap, top, True),
-            (x0, bottom, False), (x0 + size + gap, bottom, False),
-            (x0 + 2 * (size + gap), bottom, False)]
-    for x, y, lead in caps:
-        cap = QPainterPath()
-        cap.addRoundedRect(QRectF(x, y, size, size), 3.0, 3.0)
-        p.setPen(_rpen(ink, 2.4))
-        p.setBrush(_accent() if lead else Qt.NoBrush)
-        p.drawPath(cap)
-
 
 def _bed_plate(p, ink):
     """The print bed seen from a corner above: a flat parallelogram."""
@@ -1873,22 +1663,15 @@ _DRAW = {
     "dimension_baseline": _dimension_baseline,
     "dimension_diameter": _dimension_diameter,
     "dimension_angular": _dimension_angular,
-    "dimension_style": _dimension_style,
-    "geopath": _geopath, "orbit": _orbit, "pan": _pan,
+    "orbit": _orbit, "pan": _pan,
     "undo": _undo, "redo": _redo,
     "text": _text, "text3d": _text3d,
     "eraser": _eraser, "tape": _tape, "protractor": _protractor,
-    "section": _section,
-    "styles": _styles_icon, "shadows": _shadows_icon,
-    "section_planes": _section_planes, "section_cuts": _section_cuts,
-    "section_fill": _section_fill,
+    "styles": _styles_icon,
     "zoom": _zoom, "zoom_window": _zoom_window,
-    "position_camera": _position_camera, "walk": _walk,
-    "look_around": _look_around, "first_person": _first_person,
     "zoom_extents": _zoom_extents, "zoom_selection": _zoom_selection,
     "view_iso": _view_iso,
     "proj_parallel": _proj_parallel, "proj_perspective": _proj_perspective,
-    "proj_two_point": _proj_two_point,
     # Standard views — the cube with the viewed face highlighted.
     "view_top": _view_top,
     "view_bottom": _view_bottom,
@@ -1933,7 +1716,7 @@ _PENCIL_TOOLS = {
     "rectangle": "rectangle", "rectangle_center": "rectangle_center",
     "rotated_rect": "rotated_rect",
     "circle": "circle", "polygon": "polygon", "arc": "arc", "arc3": "arc3",
-    "center_arc": "center_arc", "pie": "pie", "geopath": "geopath",
+    "center_arc": "center_arc", "pie": "pie",
 }
 _PENCIL_HOT = (6.0, 42.0)          # the tip, in 48-space
 
@@ -1955,11 +1738,6 @@ _CURSOR_HOTSPOTS = {
     "pan": (24, 24),
     "zoom": (21, 21),               # the magnifier's lens centre
     "zoom_window": (21, 22),
-    "section": (24, 27),            # the plane's centre
-    "position_camera": (23, 44),    # the marker's tip: where the camera goes
-    "walk": (24, 24),
-    "look_around": (24, 26),        # the pupil
-    "first_person": (24, 24),
 }
 
 

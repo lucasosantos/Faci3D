@@ -104,14 +104,10 @@ def test_edge_layer_survives_split_and_snapshot():
 
 def test_annotations_take_layers_like_any_entity(tmp_path):
     """Cotas and leader texts are tagged like any entity: default layer when
-    born, reassignable, hidden with their layer (so a scene that hides an
-    "Anotaciones" layer shows a clean model — no need to duplicate the
-    fountain, Marco 2026-09-02), unselectable when locked, and the layer
-    survives the .igz round trip."""
+    born, reassignable, hidden with their layer, unselectable when locked,
+    and the layer survives the .igz round trip."""
     from PySide6.QtGui import QVector3D
-    from core.camera import OrbitCamera
     from core.dimension import Dimension
-    from core.saved_views import SavedView
     from core.textlabel import TextLabel
     from formats import igz as igz_format
 
@@ -136,16 +132,6 @@ def test_annotations_take_layers_like_any_entity(tmp_path):
     scene.layer("Anotaciones").locked = True
     assert scene.entity_visible(lab) and not scene.entity_selectable(lab)
     scene.layer("Anotaciones").locked = False
-
-    # A scene that hides the layer hides the annotations on recall.
-    cam = OrbitCamera()
-    scene.layer("Anotaciones").visible = False
-    limpia = SavedView.capture("Planta limpia", scene, cam)
-    scene.layer("Anotaciones").visible = True
-    scene.saved_views.append(limpia)
-    limpia.apply(scene, cam)
-    assert not scene.entity_visible(dim)
-    scene.layer("Anotaciones").visible = True
 
     # The tag travels in the document.
     path = tmp_path / "anotaciones.igz"

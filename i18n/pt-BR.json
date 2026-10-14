@@ -2925,5 +2925,20 @@
  "{name}: {w:.1f} × {h:.1f} mm as drawn.": "{name}: {w:.1f} × {h:.1f} mm no desenho original.",
  "Closed shapes become faces, ready for Push/Pull.": "Formas fechadas viram faces, prontas para Empurrar / Puxar.",
  "Imported {name}: {faces} faces, {w:.1f} × {h:.1f} mm.": "{name} importado: {faces} faces, {w:.1f} × {h:.1f} mm.",
- "Text was left out: convert it to paths first.": "O texto ficou de fora: converta-o em curvas antes."
+ "Text was left out: convert it to paths first.": "O texto ficou de fora: converta-o em curvas antes.",
+ "Faci3D project (*.faci3d)": "Projeto do Faci3D (*.faci3d)",
+ "Faci3D project or IngeTrazo document (*.faci3d *.igz)": "Projeto do Faci3D ou documento do IngeTrazo (*.faci3d *.igz)",
+ "Save the project — the model and every sheet — to its .faci3d file.": "Salva o projeto — o modelo e todas as folhas — no seu arquivo .faci3d.",
+ "Open a Faci3D project (.faci3d) in place of this one.": "Abre um projeto do Faci3D (.faci3d) no lugar deste.",
+ "IngeTrazo document (.igz)…": "Documento do IngeTrazo (.igz)…",
+ "Open an IngeTrazo document as a new project; Save keeps it as .faci3d.": "Abre um documento do IngeTrazo como um projeto novo; Salvar o guarda como .faci3d.",
+ "Project as component (.faci3d, .igz)…": "Projeto como componente (.faci3d, .igz)…",
+ "Bring another project in as one component, placed with a click.": "Traz outro projeto como um único componente, posicionado com um clique.",
+ "Project as component": "Projeto como componente",
+ "Auto-saved copies (*.faci3d *.igz)": "Cópias salvas automaticamente (*.faci3d *.igz)",
+ "Open Faci3D project": "Abrir projeto do Faci3D",
+ "Save Faci3D project": "Salvar projeto do Faci3D",
+ "Imported {name}: Save keeps it as a .faci3d project.": "{name} importado: Salvar o guarda como projeto .faci3d.",
+ "You are running IngeTrazo as an AppImage. Add a launcher with its icon to your applications menu, and associate .faci3d files with it? Nothing is copied: the launcher points at this file, so keep it where it is.": "Você está executando o IngeTrazo como um AppImage. Adicionar um lançador com seu ícone ao menu de aplicativos e associar os arquivos .faci3d a ele? Nada é copiado: o lançador aponta para este arquivo, então mantenha-o onde está.",
+ "Save the project — the model and every sheet — to its .faci3d (Ctrl+S). Auto-save (Preferences) keeps a recovery copy too.": "Salva o projeto — o modelo e todas as folhas — no seu .faci3d (Ctrl+S). O salvamento automático (Preferências) também mantém uma cópia de recuperação."
 }

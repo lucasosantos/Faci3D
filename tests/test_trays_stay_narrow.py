@@ -45,7 +45,7 @@ def _window(qapp):
 def test_every_right_hand_tab_fits_the_trays_floor(qapp):
     w = _window(qapp)
     docks = {d.objectName(): d for d in w.findChildren(QDockWidget)}
-    for name in ("tray_properties", "tray_bim", "tray_georef"):
+    for name in ("tray_properties",):
         assert docks[name].minimumSizeHint().width() <= BUDGET, name
         for scroll in docks[name].findChildren(QScrollArea):
             inner = scroll.widget()

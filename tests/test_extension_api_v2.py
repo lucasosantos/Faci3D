@@ -193,8 +193,8 @@ def test_an_extension_opens_its_own_file_type(win):
     assert opened == [Path("/tmp/job.XYZ")]
 
 
-@pytest.mark.parametrize("suffix", [".igz", ".dae", ".skp", ".dxf", ".dwg",
-                                    ".obj", ".stl", ".glb"])
+@pytest.mark.parametrize("suffix", [".faci3d", ".igz", ".dae", ".skp",
+                                    ".obj", ".stl", ".glb", ".svg"])
 def test_a_core_suffix_cannot_be_claimed(win, caplog, suffix):
     _app_for(win).add_file_opener(suffix, lambda p: True)
     assert suffix not in win.file_openers

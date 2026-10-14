@@ -1487,10 +1487,6 @@ class PushPullTool(Tool):
         push" reports, #270). X-ray and wireframe show everything:
         ``_is_occluded`` is already False there, and the cut hides its side
         in every style — the same rule the snaps follow."""
-        from views.viewport import _active_cut
-        sp = _active_cut(vp.scene)
-        if sp is not None and sp.side(world) > 1e-6:
-            return True
         occluded = getattr(vp, "_is_occluded", None)   # stub viewports in tests
         return occluded is not None and occluded(world)
 
@@ -1924,19 +1920,13 @@ class PushPullTool(Tool):
         target = self._target_scene(scene)
         mesh = target.mesh
         before_edges = set(mesh.edges)
-        # Pushing a tagged face EXTENDS its BIM object: the walls and cap the
-        # extrusion creates join the base's tag (thickening a tagged slab, or
-        # raising a wall from a rect the active class stamped, yields a fully
-        # tagged solid). Capture before the mutation — the base is consumed.
-        base_tag = None
+        # Pushing a painted face paints the walls and cap the extrusion
+        # creates. Capture before the mutation — the base is consumed.
         base_paint = None
         if self.base_face is not None:
-            t = self.base_face.attrs.get("ifc")
-            if t:
-                base_tag = dict(t)
             base_paint = _paint_of(self.base_face)
         before_verts = ({id(v) for v in mesh.vertices}
-                        if base_tag is not None or base_paint else None)
+                        if base_paint else None)
         guard = (mesh.capture_state()
                  if is_closed(mesh) and not _mesh_is_flat(mesh) else None)
         fp_before = self._mesh_fingerprint(mesh) if guard is not None else None
@@ -1953,11 +1943,11 @@ class PushPullTool(Tool):
             self._refused = True
             return
         self._soften_curve_facets(mesh, before_edges)
-        if base_tag is not None or base_paint:
+        if base_paint:
             # Only faces carrying at least one vertex this push created — the
-            # extrusion's own walls/cap. Rebuilt neighbours (an untagged floor
-            # plane re-emitted over its OLD vertices) are never touched, and a
-            # face that already carries a tag (or its own paint) keeps it. Runs
+            # extrusion's own walls/cap. Rebuilt neighbours (an unpainted
+            # floor plane re-emitted over its OLD vertices) are never touched,
+            # and a face that already carries its own paint keeps it. Runs
             # inside the commit's SnapshotMutation (and the reverted preview),
             # so undo is exact.
             #
@@ -1969,8 +1959,6 @@ class PushPullTool(Tool):
                 if id(v) not in before_verts:
                     fresh.update(v.faces())
             for f in fresh:
-                if base_tag is not None and not f.attrs.get("ifc"):
-                    f.attrs["ifc"] = dict(base_tag)
                 if base_paint and not any(k in f.attrs for k in PAINT_KEYS):
                     f.attrs.update(base_paint)
 

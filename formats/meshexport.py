@@ -348,15 +348,3 @@ def export_names(materials) -> dict:
     return names
 
 
-def geolocation(scene):
-    """The scene's geographic anchor as ``(lat, lon, alt)`` in degrees/metres,
-    or ``None`` when the scene has no georef datum. This is what carries the
-    model's location (for sun/shadow studies) across the export."""
-    g = getattr(scene, "georef", None)
-    if g is None:
-        return None
-    lat = getattr(g, "lat", None)
-    lon = getattr(g, "lon", None)
-    if lat is None or lon is None:
-        return None
-    return (float(lat), float(lon), float(getattr(g, "alt", 0.0)))

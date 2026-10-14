@@ -11,10 +11,8 @@ Primeira versão do Faci3D, um fork do IngeTrazo 0.5.8 voltado para
 impressão 3D. O motor de modelagem é o do IngeTrazo 0.5.8.
 
 ### Adicionado
-- **Modo impressão 3D**: barras com as ferramentas do dia a dia; os recursos
-  de arquitetura (georreferência, BIM, pranchas, cortes, caminhada, sombras)
-  ficam escondidos. `full_interface=1` na seção `[ui]` das configurações
-  traz a interface completa de volta.
+- **Modo impressão 3D**: barras com as ferramentas do dia a dia; as demais
+  continuam nos menus, com seus atalhos.
 - **Milímetros** por padrão nos documentos novos, com precisão de 0,1 mm.
 - **Mesa de impressão opcional** (menu Impressão 3D): impressoras comuns ou
   medidas próprias, placa com grade de 10 mm e volume de impressão no
@@ -23,6 +21,11 @@ impressão 3D. O motor de modelagem é o do IngeTrazo 0.5.8.
 - **Importar SVG**: contornos fechados viram faces planas no chão, prontas
   para Empurrar / Puxar; contornos internos viram furos; tamanho real e
   ajustável.
+- **Projetos `.faci3d`**: Salvar e Abrir usam a extensão própria do Faci3D
+  (o conteúdo é o mesmo formato do IngeTrazo). Um `.igz` entra por
+  *Arquivo ▸ Importar ▸ Documento do IngeTrazo* (ou por clique duplo / linha
+  de comando) como um projeto novo, sem salvar por cima do original.
+  As cópias de salvamento automático também passam a ser `.faci3d`.
 - Um **vaso de planta de 150 mm** como figura de escala inicial.
 - Identidade **Faci3D**: nome, ícone e janela Sobre (com os créditos do
   IngeTrazo).
@@ -41,6 +44,23 @@ impressão 3D. O motor de modelagem é o do IngeTrazo 0.5.8.
   instalado. Os pacotes saem sem assinatura digital.
 - Snap e Flatpak desligados até terem identidade própria (as receitas
   continuam em `packaging/`).
+
+### Removido
+Os recursos de arquitetura e engenharia civil do IngeTrazo saíram do
+programa (antes ficavam só escondidos):
+- **Georreferência**: mapa base, terreno 3D, pontos de levantamento (CSV
+  UTM), malha fotogramétrica (WebODM), ortomosaico (GeoTIFF), KML/GeoJSON,
+  ferramenta Caminho e perfil de terreno, leitura de coordenadas UTM.
+- **BIM**: painel de classificação IFC, exportação IFC e quantitativos.
+- **Pranchas**: o compositor de folhas, as abas Modelo/Folha e a exportação
+  da vista atual em DXF.
+- **Cortes de seção**, **cenas salvas**, **sombras do sol**, **caminhada**
+  (Posicionar câmera, Caminhar, Olhar em volta, Primeira pessoa),
+  **perspectiva de dois pontos** e o estilo **Arquitetônico**.
+- **Importação DXF/DWG** (e o conversor LibreDWG), **Renderizar com
+  Blender**, a extensão de exemplo Windowizer e o painel Estilo de cotas.
+- Documentos `.igz` antigos com esses dados continuam abrindo: o modelo
+  entra, o resto é ignorado.
 
 ---
 

@@ -1,7 +1,7 @@
-"""The right-side trays (Properties, BIM, Terrain) always have a way back:
+"""The right-side trays (Properties, Browser) always have a way back:
 their Window-menu entries work, and folding the sidebar brings back every
-tray that was open — not just the tab in front (Marco, 0.5.1 Flatpak: «no
-veo las pestañas de terreno y BIM», the menu entries greyed out)."""
+tray that was open — not just the tab in front (Marco, 0.5.1 Flatpak: the
+menu entries greyed out)."""
 from __future__ import annotations
 
 import os
@@ -29,17 +29,15 @@ def settings_file(tmp_path, monkeypatch):
     return path
 
 
-
-
 def test_the_window_menu_can_bring_back_every_tray(settings_file):
     from views.main_window import MainWindow
     win = MainWindow()
     for dock in win._sidebar_docks():
         assert dock.toggleViewAction().isEnabled(), dock.objectName()
-    win.bim_tray.hide()
-    assert not win.bim_tray.toggleViewAction().isChecked()
-    win.bim_tray.toggleViewAction().trigger()
-    assert not win.bim_tray.isHidden()
+    win.project_browser.hide()
+    assert not win.project_browser.toggleViewAction().isChecked()
+    win.project_browser.toggleViewAction().trigger()
+    assert not win.project_browser.isHidden()
 
 
 def test_unfolding_the_sidebar_brings_back_the_tabs_behind(settings_file,
@@ -57,8 +55,6 @@ def test_unfolding_the_sidebar_brings_back_the_tabs_behind(settings_file,
     real = QDockWidget.isVisible
     monkeypatch.setattr(QDockWidget, "isVisible",
                         lambda d: real(d) and d is front)
-    for dock in (win.bim_tray, win.georef_tray):    # open them all
-        dock.toggleViewAction().trigger()
     right = [d for d in win._sidebar_docks() if not d.isHidden()
              and win.dockWidgetArea(d) != Qt.LeftDockWidgetArea]
     win._set_sidebar_visible(False)
@@ -88,8 +84,6 @@ def test_a_first_run_opens_the_everyday_trays_and_keeps_the_rest_ready(
     assert not win.project_browser.isHidden()          # the model's tree
     assert win.project_browser in win.tabifiedDockWidgets(win.tray)
     assert _tab_order(win)[:2] == ["Properties", "Browser"]
-    assert win.bim_tray.isHidden() and win.georef_tray.isHidden()
-    assert win.bim_tray.toggleViewAction().isEnabled()  # one click away
     _close(win)
 
 
@@ -107,8 +101,6 @@ def _tab_order(win):
 def test_restore_default_panels_puts_everything_back(settings_file):
     from views.main_window import MainWindow
     win = _shown(MainWindow())
-    win.georef_tray.toggleViewAction().trigger()     # opened
-    win.move_dock(win.bim_tray, Qt.LeftDockWidgetArea)
     win.move_dock(win.project_browser, Qt.LeftDockWidgetArea)
     _app.processEvents()
     win.restore_default_trays()
@@ -116,7 +108,6 @@ def test_restore_default_panels_puts_everything_back(settings_file):
         _app.processEvents()
     assert all(win.dockWidgetArea(d) == Qt.RightDockWidgetArea
                for d in win._sidebar_docks())
-    assert win.georef_tray.isHidden() and win.bim_tray.isHidden()
     assert not win.tray.isHidden() and not win.project_browser.isHidden()
     assert _tab_order(win)[:2] == ["Properties", "Browser"]
     # The test's own INI: the QSettings name imported above is not the
@@ -129,26 +120,19 @@ def test_restore_default_panels_puts_everything_back(settings_file):
 def test_every_tray_opens_at_start_up_unless_the_menu_closed_it(settings_file):
     from views.main_window import MainWindow
     win = _shown(MainWindow())
-    for dock in (win.bim_tray, win.georef_tray):    # opened from the menu
-        dock.toggleViewAction().trigger()
-    _close(win)
-    win = _shown(MainWindow())
-    win.bim_tray.hide()                 # lost by a fold, not by the menu
-    win.georef_tray.toggleViewAction().trigger()    # closed from the menu
-    assert win.georef_tray.isHidden()
+    win.tray.hide()                     # lost by a fold, not by the menu
+    win.project_browser.toggleViewAction().trigger()  # closed from the menu
+    assert win.project_browser.isHidden()
     _close(win)                         # the layout is saved on close
 
     win = _shown(MainWindow())
     assert not win.tray.isHidden()
-    assert not win.bim_tray.isHidden()
-    assert win.georef_tray.isHidden()
-    win.georef_tray.toggleViewAction().trigger()    # back from the menu
+    assert win.project_browser.isHidden()
+    win.project_browser.toggleViewAction().trigger()  # back from the menu
     _close(win)
 
     win = _shown(MainWindow())
-    assert not any(d.isHidden() for d in (win.tray, win.bim_tray,
-                                          win.georef_tray,
-                                          win.project_browser))
+    assert not any(d.isHidden() for d in (win.tray, win.project_browser))
     _close(win)
 
 
@@ -165,16 +149,15 @@ def test_a_folded_sidebar_opens_unfolded(settings_file):
     _close(win)
 
 
-def test_ai_and_render_open_and_an_extension_may_ask_to_start_hidden(
+def test_ai_opens_and_an_extension_may_ask_to_start_hidden(
         settings_file):
     from PySide6.QtWidgets import QLabel
     from views.extension_api import ExtensionApp
     from views.main_window import MainWindow
     win = _shown(MainWindow())
-    for name in ("extension_ai", "extension_render_blender"):
-        dock = win.extension_panels().get(name)
-        if dock is not None:                          # bundled, if loaded
-            assert not dock.isHidden(), name
+    dock = win.extension_panels().get("extension_ai")
+    if dock is not None:                              # bundled, if loaded
+        assert not dock.isHidden()
     app = ExtensionApp(win, "quiet")
     quiet = app.add_panel("Quiet", QLabel("q"), start_hidden=True)
     loud = ExtensionApp(win, "loud").add_panel("Loud", QLabel("l"))
@@ -194,11 +177,11 @@ def test_a_new_extension_asking_to_start_hidden_does_so_on_a_used_profile(
     from views.extension_api import ExtensionApp
     from views.main_window import MainWindow
     win = _shown(MainWindow())
-    win.georef_tray.toggleViewAction().trigger()      # a choice is saved
+    win.project_browser.toggleViewAction().trigger()  # a choice is saved
     _close(win)
     win = _shown(MainWindow())
     late = ExtensionApp(win, "late").add_panel("Late", QLabel("l"),
                                                start_hidden=True)
     assert late.isHidden()                            # installed later: hidden
-    assert not win.georef_tray.isHidden()             # the choice still rules
+    assert win.project_browser.isHidden()             # the choice still rules
     _close(win)

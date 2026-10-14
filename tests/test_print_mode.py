@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (C) 2026 Marco Sumari Tellez and IngeTrazo contributors.
 """Faci3D's 3D-printing interface (views/print_mode.py): the architecture
-features out of sight, everyday modelling tools in reach, millimetres."""
+features gone, everyday modelling tools in reach, millimetres."""
 from __future__ import annotations
 
 import pytest
@@ -41,7 +41,7 @@ def _bar_keys(win, name):
     return [key_of.get(a, a.text()) for a in win.toolbars[name].actions()]
 
 
-def test_architecture_toolbars_leave_the_window(win):
+def test_architecture_toolbars_are_gone(win):
     left = {tb.objectName() for tb in win.findChildren(QToolBar)
             if tb.parent() is win}
     assert "sections" not in left and "walkthrough" not in left
@@ -52,10 +52,8 @@ def test_architecture_toolbars_leave_the_window(win):
 def test_trimmed_bars_keep_the_everyday_tools_in_order(win):
     for name, keep in print_mode.TOOLBAR_KEEP.items():
         assert _bar_keys(win, name) == list(keep)
-    assert win._projection_actions["two_point"] not in \
-        win.toolbars["views"].actions()
-    assert not win._panel_actions["shadows"].isVisible()
-    assert win._panel_actions["styles"].isVisible()
+    assert set(win._projection_actions) == {"parallel", "perspective"}
+    assert set(win._panel_actions) == {"styles"}
 
 
 def test_a_tool_off_the_bar_still_answers_from_the_menu(win):
@@ -65,52 +63,87 @@ def test_a_tool_off_the_bar_still_answers_from_the_menu(win):
     assert act.isVisible()
 
 
+#: Menu entries of the architecture features Faci3D removed, as English
+#: source paths from the menu bar down.
+REMOVED_MENU_ITEMS = (
+    ("File", "Import", "Orthomosaic (GeoTIFF)…"),
+    ("File", "Import", "AutoCAD DWG (.dwg)…"),
+    ("File", "Import", "AutoCAD DXF (.dxf)…"),
+    ("File", "Import", "Georeference (KML / GeoJSON)…"),
+    ("File", "Import", "Survey points CSV (UTM)…"),
+    ("File", "Import", "Photogrammetric mesh (WebODM)…"),
+    ("File", "Import", "Clear imported texture cache…"),
+    ("File", "Export", "IFC (BIM)…"),
+    ("File", "Export", "Current view as DXF…"),
+    ("File", "Sheet composer…"),
+    ("Edit", "Convert Path to Geometry"),
+    ("Camera", "Two-Point Perspective"),
+    ("Camera", "Style", "Architectural"),
+    ("Camera", "Shadows"),
+    ("Camera", "Section Planes"),
+    ("Camera", "Section Cuts"),
+    ("Camera", "Section Fill"),
+    ("Camera", "Position Camera"),
+    ("Camera", "Walk"),
+    ("Camera", "Look Around"),
+    ("Camera", "First Person"),
+    ("Draw", "Path"),
+    ("Tools", "Section Plane"),
+    ("Tools", "Terrain profile of selection"),
+    ("Window", "Terrain profile"),
+    ("Help", "Get more models and textures…"),
+)
+
+
+def _menu_paths(menubar):
+    paths = set()
+
+    def walk(menu, prefix):
+        for act in menu.actions():
+            if act.isSeparator():
+                continue
+            path = prefix + (act.text(),)
+            paths.add(path)
+            if act.menu() is not None:
+                walk(act.menu(), path)
+
+    walk(menubar, ())
+    return paths
+
+
 @pytest.mark.parametrize("lang", ["en", "es", "pt-BR"])
-def test_every_listed_menu_entry_exists_and_is_hidden(lang, monkeypatch):
+def test_the_removed_features_have_no_menu_entry(lang, monkeypatch):
     before = i18n.current_language()
     i18n.set_language(lang)
     try:
         monkeypatch.setattr(MainWindow, "print_mode", True)
         w = MainWindow()
         try:
-            # Applying again finds them all once more: none of the paths is
-            # a typo that silently hides nothing.
-            assert print_mode._hide_menu_items(w.menuBar()) == \
-                len(print_mode.HIDDEN_MENU_ITEMS)
-            sheets = [a for a in w.menuBar().actions()[0].menu().actions()
-                      if a.text() == i18n.tr("Sheet composer…")]
-            assert sheets and not sheets[0].isVisible()
+            shown = _menu_paths(w.menuBar())
+            gone = {tuple(i18n.tr(part) for part in path)
+                    for path in REMOVED_MENU_ITEMS}
+            assert not shown & gone
+            # The menus are still there: the check is not passing empty.
+            assert (i18n.tr("File"), i18n.tr("Import"),
+                    i18n.tr("SVG drawing (.svg)…")) in shown
         finally:
             _close(w)
     finally:
         i18n.set_language(before)
 
 
-def test_bim_and_terrain_panels_are_out_of_the_panels_menu(win):
+def test_only_the_modelling_trays_are_left(win):
     names = {d.objectName() for d in win._sidebar_docks()}
-    assert not names & print_mode.HIDDEN_DOCKS
-    assert win.bim_tray.isHidden() and win.georef_tray.isHidden()
-    assert "tray_properties" in names
-    assert win.tray.scenes.parentWidget().isHidden()
+    assert {"tray_properties", "tray_project_browser"} <= names
+    assert not names & {"tray_bim", "tray_georef", "dock_profile"}
+    assert not hasattr(win.tray, "scenes")
     assert not win.tray.materials.parentWidget().isHidden()
 
 
-def test_render_with_blender_is_not_loaded():
-    from types import SimpleNamespace
-    assert print_mode.skip_plugin(
-        SimpleNamespace(path="/x/plugins/render_blender.py"))
-    assert not print_mode.skip_plugin(
-        SimpleNamespace(path="/x/plugins/solid_inspector.py"))
-
-
-def test_the_full_interface_is_one_setting_away():
-    st = QSettings()
-    st.setValue(print_mode.FULL_INTERFACE_KEY, "1")
-    try:
-        assert not print_mode.enabled()
-    finally:
-        st.remove(print_mode.FULL_INTERFACE_KEY)
-    assert print_mode.enabled()
+def test_render_with_blender_is_gone():
+    from core.paths import app_root
+    assert not (app_root() / "plugins" / "render_blender.py").exists()
+    assert (app_root() / "plugins" / "solid_inspector.py").exists()
 
 
 def test_new_documents_start_in_millimetres(win):

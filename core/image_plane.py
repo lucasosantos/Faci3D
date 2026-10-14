@@ -165,8 +165,7 @@ def image_aspect(path) -> tuple[float, int, int]:
     """``(aspect, pixel_width, pixel_height)`` of an image file, where aspect is
     height/width. Reads the header only — no full decode — and lifts
     ``QImageReader``'s 256 MB allocation cap, which otherwise rejects large
-    scans with a misleading "out of memory" (the same trap ``georef/photomesh``
-    documents). Returns ``(1.0, 0, 0)`` when the file is unreadable."""
+    scans with a misleading "out of memory". Returns ``(1.0, 0, 0)`` when the file is unreadable."""
     from PySide6.QtGui import QImageReader
 
     previous = QImageReader.allocationLimit()

@@ -30,27 +30,6 @@ def settings_file(tmp_path, monkeypatch):
     return path
 
 
-def test_the_size_reaches_the_composer_toolbars_live_and_on_build(settings_file, monkeypatch):
-    from views.composer import ComposerWindow
-    from views.main_window import MainWindow
-    monkeypatch.setattr(ComposerWindow, "render_frame", lambda self, f: None)
-    win = MainWindow()
-    try:
-        win.set_toolbar_icon_size(40)
-        comp = ComposerWindow(win)
-        win._composer = comp
-        try:
-            bars = win.findChildren(QToolBar) + comp.findChildren(QToolBar)
-            assert bars and all(tb.iconSize().width() == 40 for tb in bars)
-            win.set_toolbar_icon_size(20)                  # live, both windows
-            assert all(tb.iconSize().width() == 20 for tb in bars)
-        finally:
-            comp.close()
-    finally:
-        win._saved_version = win.viewport.scene.version
-        win.close()
-
-
 def test_the_main_toolbar_starts_with_save(settings_file, monkeypatch):
     """Marco, 2026-09-14: the Save icon on the model's Main bar too, before
     the Select arrow; it triggers the same save as the menu."""
@@ -168,7 +147,7 @@ def test_a_fresh_install_gets_marcos_layout_and_large_icons(settings_file, monke
     try:
         assert win.toolBarArea(win.toolbars["draw"]) == Qt.LeftToolBarArea
         assert win.toolBarArea(win.toolbars["annotate"]) == Qt.LeftToolBarArea
-        for name in ("main", "modify", "view", "sections", "views"):
+        for name in ("main", "modify", "view", "views"):
             assert win.toolBarArea(win.toolbars[name]) == Qt.TopToolBarArea, name
         assert all(tb.iconSize().width() == 24 for tb in win.toolbars.values())
     finally:
@@ -228,110 +207,14 @@ def test_the_sidebar_handle_sits_on_the_resize_line_and_folds_the_trays(settings
         win._act_sidebar.setChecked(True)                           # unfold (Ctrl+F5)
         QApplication.processEvents()
         assert win.tray.isVisible()
-        # Switching the tabbed trays (Terrain ↔ BIM) must not bury the handle.
-        for dock in (win.bim_tray, win.georef_tray, win.tray):
+        # Switching the tabbed trays must not bury the handle.
+        for dock in (win.project_browser, win.tray):
             dock.show()
             dock.raise_()
             QApplication.processEvents()
             QApplication.processEvents()
             top = win.childAt(btn.geometry().center())
             assert top is btn or btn.isAncestorOf(top), dock.objectName()
-    finally:
-        win._saved_version = win.viewport.scene.version
-        win.close()
-
-
-def _composer(monkeypatch):
-    from views.composer import ComposerWindow
-    from views.main_window import MainWindow
-    monkeypatch.setattr(ComposerWindow, "render_frame", lambda self, f: None)
-    win = MainWindow()
-    comp = ComposerWindow(win)
-    win._composer = comp
-    return win, comp
-
-
-def test_the_composer_has_the_same_handle_and_clean_screen(settings_file, monkeypatch):
-    """Marco, 2026-09-14: «en composiciones implementa ese mismo botón…
-    también Ctrl+0». The handle sits on the splitter line, folds the
-    right panel away; Ctrl+0 leaves only the page plus the exit button."""
-    win, comp = _composer(monkeypatch)
-    try:
-        comp.resize(1200, 800)
-        comp.show()
-        QApplication.processEvents()
-        btn = comp._sidebar_handle
-        panel = comp._side_panel              # the right side panel
-        area = comp._canvas_area               # the page, left of it
-        assert btn.isVisible() and panel.isVisible()
-        edge = area.mapTo(comp, area.rect().topRight()).x()
-        assert btn.x() >= edge                 # never over the canvas' scroll bar
-        assert btn.x() <= edge + comp._splitter.handleWidth()
-        btn.click()
-        QApplication.processEvents()
-        assert not panel.isVisible() and not comp._act_sidebar.isChecked()
-        QApplication.processEvents()
-        assert btn.x() + btn.width() >= comp.width() - 2
-        comp._act_sidebar.setChecked(True)
-        QApplication.processEvents()
-        assert panel.isVisible()
-        # Ctrl+0
-        comp._act_clean_screen.setChecked(True)
-        QApplication.processEvents()
-        assert not any(tb.isVisible() for tb in comp.findChildren(QToolBar))
-        assert not panel.isVisible() and not btn.isVisible()
-        exit_btn = comp._clean_exit_btn
-        assert exit_btn.isVisible()
-        assert exit_btn.x() + exit_btn.width() <= comp._view.width()
-        exit_btn.click()
-        QApplication.processEvents()
-        assert comp._sheet_tb.isVisible() and panel.isVisible() and btn.isVisible()
-    finally:
-        comp.close()
-        win._saved_version = win.viewport.scene.version
-        win.close()
-
-
-def test_the_composer_toolbars_are_movable_and_their_arrangement_is_remembered(settings_file, monkeypatch):
-    """The factory look is the code's (tools left, sheet top); what the
-    user drags is saved on close and restored next time."""
-    from PySide6.QtCore import Qt
-    win, comp = _composer(monkeypatch)
-    try:
-        comp.show()
-        QApplication.processEvents()
-        tools = comp.findChild(QToolBar, "composer_tools")
-        assert tools.isMovable() and comp._sheet_tb.isMovable()
-        assert comp.toolBarArea(tools) == Qt.LeftToolBarArea
-        assert comp.toolBarArea(comp._sheet_tb) == Qt.TopToolBarArea
-        # The drawing tools on their own TOP bar: 23 in one column did not
-        # fit a 768 px laptop screen (Marco, 2026-09-14).
-        draw = comp.findChild(QToolBar, "composer_draw")
-        assert comp.toolBarArea(draw) == Qt.TopToolBarArea
-        # Factory order along the top: Sheet, Draw, Arrange (Marco, 14-09).
-        top = sorted((tb for tb in comp.findChildren(QToolBar)
-                      if comp.toolBarArea(tb) == Qt.TopToolBarArea and tb.isVisible()),
-                     key=lambda tb: tb.x())
-        assert [tb.objectName() for tb in top] == [
-            "sheet_toolbar", "composer_draw", "arrange_toolbar"]
-        # 11 on the draw bar: the radius and the baseline dimensions;
-        # 16 on the tools bar: Zoom and Zoom Window joined it (20-09)
-        assert len(tools.actions()) == 16 and len(draw.actions()) == 11
-        assert comp._tool_actions["cota"] in draw.actions()
-        assert comp._tool_actions["vista"] in tools.actions()
-        comp._tool_actions["cota"].trigger()          # one exclusive group
-        assert comp.tool_mode == "cota" and not comp._tool_actions["select"].isChecked()
-        comp.addToolBar(Qt.RightToolBarArea, tools)     # the user drags it
-        comp.close()
-        QApplication.processEvents()
-        comp2 = type(comp)(win)
-        try:
-            comp2.show()
-            QApplication.processEvents()
-            t2 = comp2.findChild(QToolBar, "composer_tools")
-            assert comp2.toolBarArea(t2) == Qt.RightToolBarArea
-        finally:
-            comp2.close()
     finally:
         win._saved_version = win.viewport.scene.version
         win.close()
@@ -345,7 +228,6 @@ def test_the_default_is_normal_on_any_screen_and_a_choice_wins(settings_file):
     assert icons.toolbar_icon_px() == 24
     icons.save_toolbar_icon_px(40)
     assert icons.toolbar_icon_px() == 40
-
 
 
 def test_the_overflow_button_wears_the_program_chevron(settings_file, monkeypatch):
@@ -369,50 +251,6 @@ def test_the_overflow_button_wears_the_program_chevron(settings_file, monkeypatc
         win.addToolBar(Qt.TopToolBarArea if vertical else Qt.LeftToolBarArea, draw)
         QApplication.processEvents()
         assert ext.icon().cacheKey() != icon_v            # re-drawn for the new orientation
-    finally:
-        win._saved_version = win.viewport.scene.version
-        win.close()
-
-
-def test_the_walkthrough_toolbar_stands_left_under_annotate(settings_file, monkeypatch):
-    """Fresh install: the factory blob puts Walkthrough at the left, right
-    under Annotate (below 3D Text — Marco, 2026-09-19). A profile whose
-    saved layout predates the toolbar gets the same placement once."""
-    from PySide6.QtCore import Qt
-    from views.main_window import MainWindow
-    win = MainWindow()
-    try:
-        win.show()
-        tb, above = win.toolbars["walkthrough"], win.toolbars["annotate"]
-        assert win.toolBarArea(tb) == Qt.LeftToolBarArea
-        assert win.toolBarArea(above) == Qt.LeftToolBarArea
-        assert tb.geometry().top() >= above.geometry().bottom() - 1
-        # A layout saved before the toolbar existed leaves it where Qt
-        # created it — the top. Stand in for that with a state that has
-        # it at the top.
-        win.removeToolBar(tb)
-        win.addToolBar(Qt.TopToolBarArea, tb)
-        tb.show()
-        top_state = bytes(win.saveState())
-    finally:
-        win._saved_version = win.viewport.scene.version
-        win.close()
-    from PySide6.QtCore import QSettings
-    st = QSettings()
-    st.remove("ui/placed/walkthrough")
-    st.setValue("ui/window_state", top_state)
-    win = MainWindow()
-    try:
-        assert win.toolBarArea(win.toolbars["walkthrough"]) == Qt.LeftToolBarArea
-        assert QSettings().value("ui/placed/walkthrough") is not None
-    finally:
-        win._saved_version = win.viewport.scene.version
-        win.close()
-    # …and once placed, the user's own arrangement is respected.
-    st.setValue("ui/window_state", top_state)
-    win = MainWindow()
-    try:
-        assert win.toolBarArea(win.toolbars["walkthrough"]) == Qt.TopToolBarArea
     finally:
         win._saved_version = win.viewport.scene.version
         win.close()

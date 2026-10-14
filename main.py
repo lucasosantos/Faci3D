@@ -135,7 +135,8 @@ def _configure_surface_format() -> None:
 
 
 def _open_document_in(window, doc: "Path") -> None:
-    """Open *doc* in *window*: .igz as the document, .skp imported through
+    """Open *doc* in *window*: .faci3d as the project (an IngeTrazo .igz as
+    a new unsaved one), .skp imported through
     the native backend after the first paint (big models parse for seconds —
     the window must be visible, not frozen pre-show). Shared by the initial
     launch and the single-instance second-launch handler."""
@@ -144,7 +145,7 @@ def _open_document_in(window, doc: "Path") -> None:
     if hasattr(window, "load_extensions"):
         window.load_extensions()
     ext = doc.suffix.lower()
-    if ext == ".igz" or ext in getattr(window, "file_openers", {}):
+    if ext in (".faci3d", ".igz") or ext in getattr(window, "file_openers", {}):
         window.open_path(doc)       # an extension's own type goes to its opener
     elif ext == ".skp":
         from PySide6.QtCore import QTimer
@@ -220,18 +221,6 @@ def _self_check() -> int:
         print(f"  {label:<15}: {'found' if ok else 'MISSING'}  {path}")
         if not ok:
             problems.append(label)
-
-    # DWG import goes through LibreDWG's dwg2dxf (#101). Linux and Windows
-    # packages carry it and a package without it is broken. macOS gets it
-    # from release-macos.yml (built from the LibreDWG tarball), so a macOS
-    # build from a plain checkout legitimately has none: reported, not
-    # fatal. find_dwg2dxf ignores a binary built for another OS, so the
-    # Linux ELF kept in vendor/ is never mistaken for a working converter.
-    from formats.dwg_bridge import find_dwg2dxf
-    dwg = find_dwg2dxf()
-    print(f"  DWG converter  : {'found' if dwg else 'MISSING'}  {dwg or ''}")
-    if dwg is None and is_frozen() and sys.platform != "darwin":
-        problems.append("DWG converter")
 
     # ``ingetrazo --mcp`` runs scripts/ingetrazo_mcp.py by path, and that
     # server reads its recipe book from core.ai_recipes. The Flatpak of
@@ -387,6 +376,9 @@ def main() -> int:
     except Exception:
         platform_forced = None
     _configure_surface_format()
+    # X11's WM_CLASS instance name, which the shell also matches against the
+    # launchers' StartupWMClass: the executable is still called "ingetrazo".
+    os.environ.setdefault("RESOURCE_NAME", "faci3d")
     app = _App(sys.argv)
     app.setProperty("platform_forced", platform_forced)
     # Faci3D keeps its settings apart from an IngeTrazo installed beside it.
@@ -421,11 +413,11 @@ def main() -> int:
     app.setWindowIcon(icon)
     # Wayland matches the running window to its .desktop entry (and thus the
     # dock icon) by this name — see scripts/install_desktop.sh. Inside the
-    # Flatpak the entry is the app id: a window claiming "ingetrazo" there
-    # matched nothing, so the shell (and GNOME Software's Open button, which
-    # waits for the launched app to appear) never tied it to the launcher.
+    # Flatpak the entry is the app id. Faci3D's own id, never "ingetrazo":
+    # with IngeTrazo installed too, the dock showed IngeTrazo's name and
+    # icon on our window.
     import os as _os
-    app.setDesktopFileName(_os.environ.get("FLATPAK_ID") or "ingetrazo")
+    app.setDesktopFileName(_os.environ.get("FLATPAK_ID") or "faci3d")
     # Light or dark chrome: follows the desktop by default, live
     # (Preferences ▸ General ▸ Theme pins one). See views/theme.py.
     from views.theme import apply_theme
@@ -435,10 +427,9 @@ def main() -> int:
     from views.tooltips import WrappingToolTips
     tooltips = WrappingToolTips(app)
     app.installEventFilter(tooltips)
-    # Faci3D: the 3D-printing interface unless the user asked for the
-    # full one (views/print_mode.py).
+    # Faci3D: the 3D-printing interface (views/print_mode.py).
     from views import print_mode
-    MainWindow.print_mode = print_mode.enabled()
+    MainWindow.print_mode = True
     # The extensions' setup waits until the window is on screen (#440).
     window = MainWindow(defer_extensions=True)
     # From here on, a FileOpen Apple Event (macOS double-click / Open With,
@@ -530,13 +521,8 @@ def main() -> int:
                 _open_document_in(window, doc)
 
     QTimer.singleShot(0, _after_first_frame)
-    # Which units to work in, once the window is up (off for good with
-    # «Don't show this at startup»; Preferences ▸ Units turns it back on).
-    if MainWindow.print_mode:
-        # Printing is in millimetres: no question to ask.
-        QTimer.singleShot(0, lambda: print_mode.ensure_print_units(window))
-    else:
-        QTimer.singleShot(0, window.offer_units_at_start)
+    # Printing is in millimetres: no units question at start-up.
+    QTimer.singleShot(0, lambda: print_mode.ensure_print_units(window))
     _offer_appimage_integration(window)
     return app.exec()
 
@@ -561,7 +547,7 @@ def _offer_appimage_integration(window) -> None:
         box.setWindowTitle(tr("Add IngeTrazo to the applications menu?"))
         box.setText(tr(
             "You are running IngeTrazo as an AppImage. Add a launcher with "
-            "its icon to your applications menu, and associate .igz files "
+            "its icon to your applications menu, and associate .faci3d files "
             "with it? Nothing is copied: the launcher points at this file, "
             "so keep it where it is."))
         yes = box.addButton(tr("Add to menu"), QMessageBox.AcceptRole)

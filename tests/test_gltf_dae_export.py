@@ -1,8 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (C) 2026 Marco Sumari Tellez and IngeTrazo contributors.
 """glTF/GLB + COLLADA (.dae) export: valid containers, geometry survives,
-textures embed/copy, and the scene's geolocation rides along (the location a
-sun/shadow study needs)."""
+textures embed/copy."""
 from __future__ import annotations
 
 import json
@@ -16,7 +15,6 @@ from core.history import History
 from core.scene import Scene
 from formats import dae as dae_format
 from formats import gltf as gltf_format
-from georef.datum import SceneDatum
 import tests.test_fuzz_engine as F
 
 _NS = "{http://www.collada.org/2005/11/COLLADASchema}"
@@ -97,19 +95,6 @@ def test_glb_is_y_up(tmp_path):
     assert max(ys) > 2.9, "height should map to +Y in glTF"
 
 
-def test_glb_embeds_geolocation(tmp_path):
-    scene = Scene()
-    hist = History(scene)
-    _cube(scene, hist)
-    scene.georef = SceneDatum(-15.6167, -71.9333, 3416.0)  # Yanque, Arequipa
-    path = tmp_path / "geo.glb"
-    gltf_format.save_glb(scene, path)
-    gltf, _ = _read_glb(path)
-    geo = gltf["asset"]["extras"]["ingetrazo_geolocation"]
-    assert abs(geo["lat"] - -15.6167) < 1e-6
-    assert abs(geo["lon"] - -71.9333) < 1e-6
-    assert abs(geo["alt"] - 3416.0) < 1e-3
-
 
 def test_glb_embeds_texture_image(tmp_path):
     png = _make_png(tmp_path / "brick.png")
@@ -154,40 +139,18 @@ def test_dae_is_wellformed_zup_with_geometry(tmp_path):
     assert node.find(f"{_NS}instance_geometry") is not None
 
 
-def test_dae_geolocation_present_only_when_georeferenced(tmp_path):
+
+def test_dae_roundtrip_geometry(tmp_path):
     scene = Scene()
     hist = History(scene)
     _cube(scene, hist)
-    plain = tmp_path / "plain.dae"
-    dae_format.save_dae(scene, plain)
-    root = ET.parse(plain).getroot()
-    assert root.find(f"{_NS}asset/{_NS}coverage") is None
-
-    scene.georef = SceneDatum(-15.6167, -71.9333, 3416.0)
-    geo = tmp_path / "geo.dae"
-    dae_format.save_dae(scene, geo)
-    root = ET.parse(geo).getroot()
-    loc = root.find(f"{_NS}asset/{_NS}coverage/{_NS}geographic_location")
-    assert loc is not None
-    assert abs(float(loc.find(f"{_NS}latitude").text) - -15.6167) < 1e-6
-    assert abs(float(loc.find(f"{_NS}longitude").text) - -71.9333) < 1e-6
-
-
-def test_dae_roundtrip_geometry_and_location(tmp_path):
-    scene = Scene()
-    hist = History(scene)
-    _cube(scene, hist)
-    scene.georef = SceneDatum(-15.6167, -71.9333, 3416.0)
     path = tmp_path / "rt.dae"
     dae_format.save_dae(scene, path)
 
-    # Re-import into a fresh scene: geometry returns and the location is adopted.
+    # Re-import into a fresh scene: the geometry returns.
     scene2 = Scene()
     dae_format.load_dae(scene2, path)
     assert scene2.mesh.faces or scene2.groups
-    assert scene2.georef is not None
-    assert abs(scene2.georef.lat - -15.6167) < 1e-5
-    assert abs(scene2.georef.lon - -71.9333) < 1e-5
 
 
 def test_dae_copies_texture_image(tmp_path):

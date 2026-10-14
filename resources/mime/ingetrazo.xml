@@ -6,7 +6,9 @@
   app; .skp imports natively through the openskp backend). .dae keeps its
   existing opener — we only appear in "Open with".
 
-    .igz → application/x-ingetrazo         (IngeTrazo's own document)
+    .faci3d → application/x-faci3d         (Faci3D's project)
+    .igz → application/x-ingetrazo         (IngeTrazo's document: Faci3D
+                                            imports it as a new project)
     .dae → model/vnd.collada+xml           (COLLADA — standard type; we only
                                             attach an icon to it, keeping its
                                             existing semantics/openers)
@@ -18,6 +20,14 @@
   Copyright (C) 2026 Marco Sumari Tellez and IngeTrazo contributors.
 -->
 <mime-info xmlns="http://www.freedesktop.org/standards/shared-mime-info">
+  <mime-type type="application/x-faci3d">
+    <comment>Faci3D project</comment>
+    <comment xml:lang="es">Proyecto de Faci3D</comment>
+    <comment xml:lang="pt_BR">Projeto do Faci3D</comment>
+    <icon name="application-x-ingetrazo"/>
+    <glob pattern="*.faci3d"/>
+  </mime-type>
+
   <mime-type type="application/x-ingetrazo">
     <comment>IngeTrazo document</comment>
     <comment xml:lang="es">Documento de IngeTrazo</comment>

@@ -32,8 +32,8 @@ And per face:
   faces the engine's own orientation pass would turn.
 
 Watertight = every edge has exactly 2. The volume comes from
-:func:`core.bim.face_set_volume` — the same computation behind the BIM
-quantities, so this dialog and your takeoff can never disagree.
+:func:`core.solids.face_set_volume` — the same computation the Solid Tools
+use.
 
 **Repair** (one undo step, also on a group you are not inside) does only
 what has a single right answer: erases stray edges and duplicated faces,
@@ -61,7 +61,6 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from core import bim
 from core.history import Command
 from core.i18n import tr
 from tools.base import Tool
@@ -201,7 +200,8 @@ def inspect_mesh(mesh) -> dict:
         # A reversed face makes the signed sum lie (a 2 m cube with its
         # top turned reads 2.667 m³), so a volume is only given once
         # every face looks out.
-        volume = bim.face_set_volume([f for f in mesh.faces if _live(f)])
+        from core.solids import face_set_volume
+        volume = face_set_volume([f for f in mesh.faces if _live(f)])
 
     return {
         "faces": len(mesh.faces),

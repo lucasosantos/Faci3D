@@ -1,8 +1,8 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (C) 2026 Marco Sumari Tellez and IngeTrazo contributors.
-"""The model window's side trays work like the sheet composer's side
-panels: tabs on top with their whole names, moved to the other side by
-dragging a tab there or from its menu, each side folding on its own."""
+"""The model window's side trays: tabs on top with their whole names,
+moved to the other side by dragging a tab there or from its menu, each
+side folding on its own."""
 from __future__ import annotations
 
 from PySide6.QtCore import QMimeData, QPointF, Qt
@@ -12,14 +12,12 @@ _app = QApplication.instance() or QApplication([])
 
 
 def _window():
-    """The window with BIM and Terrain opened too (they start closed), so
-    the right side is a group of tabs as in everyday use."""
+    """The window with its right side a group of tabs, as in everyday
+    use."""
     from views.main_window import MainWindow
     win = MainWindow()
     win.resize(1400, 900)
     win.show()
-    for dock in (win.bim_tray, win.georef_tray):
-        dock.show()
     _app.processEvents()
     win._style_dock_tabs()
     return win
@@ -44,37 +42,37 @@ def test_tray_tabs_sit_on_top_with_their_whole_names():
 
 def test_a_tray_moves_to_the_left_and_back():
     win = _window()
-    dock = win.bim_tray
+    dock = win.project_browser
     win.move_dock(dock, Qt.LeftDockWidgetArea)
     _app.processEvents()
     assert win.dockWidgetArea(dock) == Qt.LeftDockWidgetArea
     assert not dock.isHidden()
     assert dock in win._side_docks(Qt.LeftDockWidgetArea)
-    win.move_dock(win.georef_tray, Qt.LeftDockWidgetArea)   # joins it, tabbed
+    win.move_dock(win.tray, Qt.LeftDockWidgetArea)   # joins it, tabbed
     _app.processEvents()
-    assert win.georef_tray in win.tabifiedDockWidgets(dock)
+    assert win.tray in win.tabifiedDockWidgets(dock)
     win.move_dock(dock, Qt.RightDockWidgetArea)
     _app.processEvents()
     assert win.dockWidgetArea(dock) == Qt.RightDockWidgetArea
-    win.move_dock(win.georef_tray, Qt.RightDockWidgetArea)
+    win.move_dock(win.tray, Qt.RightDockWidgetArea)
     _close(win)
 
 
 def test_each_side_folds_on_its_own():
     win = _window()
-    win.move_dock(win.bim_tray, Qt.LeftDockWidgetArea)
+    win.move_dock(win.project_browser, Qt.LeftDockWidgetArea)
     _app.processEvents()
     assert win._act_left_sidebar.shortcut().toString() == "Ctrl+F6"
     win._act_left_sidebar.setChecked(False)          # Ctrl+F6
-    assert win.bim_tray.isHidden()
+    assert win.project_browser.isHidden()
     assert not win.tray.isHidden()                    # the right side stays
     win._act_left_sidebar.setChecked(True)
-    assert not win.bim_tray.isHidden()
+    assert not win.project_browser.isHidden()
     win._act_sidebar.setChecked(False)                # Ctrl+F5: right only
-    assert win.tray.isHidden() and not win.bim_tray.isHidden()
+    assert win.tray.isHidden() and not win.project_browser.isHidden()
     win._act_sidebar.setChecked(True)
     assert not win.tray.isHidden()
-    win.move_dock(win.bim_tray, Qt.RightDockWidgetArea)
+    win.move_dock(win.project_browser, Qt.RightDockWidgetArea)
     _close(win)
 
 
@@ -101,10 +99,10 @@ def test_the_tab_under_the_pointer_names_its_tray():
     # Qt keeps spare tab bars around: the one on screen, inside the window.
     bar = next(tb for tb in win._dock_tab_bars() if tb.isVisible()
                and win.rect().contains(tb.mapTo(win, QPoint(0, 0))))
-    i = next(i for i in range(bar.count()) if bar.tabText(i) == "BIM")
+    i = next(i for i in range(bar.count()) if bar.tabText(i) == "Browser")
     centre = bar.tabRect(i).center()
     pos = bar.mapTo(win, centre)
-    assert win._dock_tab_at(pos) is win.bim_tray
+    assert win._dock_tab_at(pos) is win.project_browser
     _close(win)
 
 

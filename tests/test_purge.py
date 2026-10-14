@@ -18,7 +18,6 @@ from core.materials import Material
 from core.mesh import Mesh
 from core.purge import (unused_layers, unused_materials, used_layers,
                         used_materials)
-from core.saved_views import SavedView
 from core.scene import Scene
 
 
@@ -77,12 +76,6 @@ def test_a_layer_used_only_inside_a_NESTED_placement_survives():
     assert "Muebles" in used_layers(scene)
     assert unused_layers(scene) == []
 
-
-def test_a_layer_a_scene_hides_is_kept():
-    scene = Scene()
-    scene.layers.append(Layer("Anotaciones"))
-    scene.saved_views.append(SavedView("Planta", hidden_layers=["Anotaciones"]))
-    assert unused_layers(scene) == []
 
 
 def test_purge_removes_and_undo_restores_at_the_same_index():

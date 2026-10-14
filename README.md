@@ -14,10 +14,10 @@ desenhar uma peça e mandar para a impressora.**
 O Faci3D usa o jeito de modelar mais fácil que existe: desenhar uma forma no
 chão e **empurrá-la** para ganhar volume (*push/pull*). Ele é um fork do
 [IngeTrazo](https://github.com/ingelibre/ingetrazo), um modelador livre no
-estilo do SketchUp. Mantém as ferramentas de modelagem do original e deixa
-de lado tudo o que é de arquitetura e engenharia civil (georreferência, BIM,
-pranchas, cortes, sombras), para que a tela mostre só o que importa para
-imprimir.
+estilo do SketchUp. Mantém as ferramentas de modelagem do original e
+removeu tudo o que é de arquitetura e engenharia civil (georreferência, BIM,
+pranchas, cortes, sombras, cenas, caminhada, DXF/DWG/IFC), para que a tela
+mostre só o que importa para imprimir.
 
 ![O Faci3D com um texto importado de SVG e extrudado em 3 mm](docs/images/faci3d-viewport.png)
 
@@ -39,8 +39,6 @@ partir do código-fonte (veja [Como executar](#como-executar)).
   booleanas (união, subtração, interseção);
 - as demais ferramentas (Seguir, Inverter, Transferidor, cotas…) continuam
   nos menus, com seus atalhos;
-- os recursos de arquitetura ficam escondidos, não apagados — veja
-  [Interface completa](#interface-completa);
 - documentos novos em **milímetros** (precisão de 0,1 mm), sem perguntar;
 - um **vaso de planta de 150 mm** ao lado da origem dá a noção de escala.
 
@@ -83,6 +81,11 @@ partir do código-fonte (veja [Como executar](#como-executar)).
 - **exportar STL** (pergunta a unidade; milímetros por padrão), OBJ, glTF e
   COLLADA; **importar** STL, OBJ, glTF, COLLADA e arquivos `.skp`.
 
+**Projetos `.faci3d`** — *Arquivo ▸ Salvar* e *Abrir* usam o formato
+próprio do Faci3D. Documentos do IngeTrazo (`.igz`) entram por *Arquivo ▸
+Importar ▸ Documento do IngeTrazo*: abrem como um projeto novo, e *Salvar*
+guarda uma cópia `.faci3d` sem mexer no original.
+
 **Pintura com cores sólidas** — o painel Materiais traz só cores (a paleta
 RAL completa e cores próprias). Modelos importados com textura chegam
 pintados com a cor média de cada imagem.
@@ -98,9 +101,8 @@ português e espanhol).
    volume de impressão e se há formas que só se tocam (não-manifold).
 2. **Exportação** — 3MF, *Abrir no fatiador* (PrusaSlicer, Cura, Orca) e
    estimativa de filamento (volume, peso e comprimento).
-3. **Limpeza** — remover de vez o código de arquitetura que hoje só está
-   escondido, e trocar os nomes internos que ainda são do IngeTrazo
-   (pacotes, extensão `.igz`, identificador do Flatpak).
+3. **Limpeza** — trocar os nomes internos que ainda são do IngeTrazo
+   (pacotes, executável, identificador do Flatpak).
 
 ## Como executar
 
@@ -121,13 +123,6 @@ python main.py
   a frente; para outra janela, use `python main.py --new-window`.
 - No Linux, se o projeto estiver num disco NTFS, crie o ambiente virtual na
   sua pasta pessoal (como acima), não dentro do projeto.
-
-### Interface completa
-
-Para voltar à interface completa do IngeTrazo (georreferência, BIM, pranchas,
-cortes, sombras…), feche o Faci3D e acrescente ao arquivo de configurações —
-`~/.config/Faci3D/Faci3D.conf` no Linux — a linha `full_interface=1` na
-seção `[ui]`. Apague a linha para voltar ao modo impressão 3D.
 
 ### Testes
 
@@ -178,7 +173,7 @@ sob a mesma licença e mantenham os créditos.
 **Faci3D** is a free 3D modeller for **3D printing**, a fork of
 [IngeTrazo](https://github.com/ingelibre/ingetrazo) (a push/pull modeller in
 the SketchUp tradition). It keeps IngeTrazo's modelling engine and tools and
-hides the architecture features, adding a 3D-printing interface (millimetres
+removes the architecture features, adding a 3D-printing interface (millimetres
 by default), an optional print bed with *Place on bed* / *Center on bed*,
 solid-colour painting, and **SVG import** as flat faces ready for push/pull.
 Early development, no release yet — run it from source

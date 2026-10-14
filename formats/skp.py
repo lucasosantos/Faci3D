@@ -305,23 +305,6 @@ def _apply_payload_inner(scene, payload) -> str:
                                           visible=raw.get("visible", True)))
                 known.add(raw["name"])
 
-    # The file's saved scenes become saved views (camera + hidden layers);
-    # a view whose name already exists is left alone (re-import).
-    if payload.get("scenes"):
-        from core.saved_views import from_lookat
-        existing = {v.name for v in scene.saved_views}
-        for raw in payload["scenes"]:
-            if raw.get("name") in existing:
-                continue
-            scene.saved_views.append(from_lookat(
-                raw["name"], raw["eye"], raw["target"],
-                raw.get("up") or (0.0, 0.0, 1.0),
-                fov_deg=raw.get("fov", 45.0),
-                perspective=not raw.get("parallel", False),
-                ortho_height=raw.get("ortho_height") or None,
-                hidden_layers=raw.get("hidden_layers")))
-            existing.add(raw["name"])
-
     # Linear dimensions (.skp dimension entities): world endpoints + an
     # offset distance. IngeTrazo's Dimension carries the offset as a VECTOR
     # from the a–b segment to the dimension line, so turn the .skp scalar

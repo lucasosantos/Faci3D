@@ -4,8 +4,7 @@
 which read and write COLLADA natively.
 
 Import opens the models other programs export; :func:`save_dae` writes ours back out
-(Z-up, metres, per-face colour/texture, and — when georeferenced — the standard
-``<geographic_location>`` so a sun/shadow study keeps the site).
+(Z-up, metres, per-face colour/texture).
 
 COLLADA is Khronos' open XML interchange format; parsing with the stdlib
 ``xml.etree`` keeps the project dependency-free. Scope (matching what
@@ -83,14 +82,12 @@ def save_dae(scene, path, project_name: str = "IngeTrazo model") -> None:
     Solid ``Face.attrs["color"]`` become lambert diffuse colours; textured faces
     become ``<texture>`` effects with the image copied beside the ``.dae`` (same
     as the OBJ exporter — send the file *and* the folder together, or use GLB to
-    avoid the split). When the scene is georeferenced, the model's location
-    rides in the standard ``<asset><coverage><geographic_location>`` — the right
-    place for it, so a sun/shadow study keeps the site.
+    avoid the split).
     """
     import shutil
     from datetime import datetime, timezone
 
-    from .meshexport import collect_geometry, export_names, geolocation
+    from .meshexport import collect_geometry, export_names
 
     path = Path(path)
     materials_in, prims = collect_geometry(scene)
@@ -165,14 +162,6 @@ def save_dae(scene, path, project_name: str = "IngeTrazo model") -> None:
     out.append("<contributor><authoring_tool>IngeTrazo</authoring_tool>"
                "</contributor>")
     out.append(f"<created>{now}</created><modified>{now}</modified>")
-    geo = geolocation(scene)
-    if geo is not None:
-        lat, lon, alt = geo
-        out.append("<coverage><geographic_location>")
-        out.append(f"<longitude>{lon:.9f}</longitude>")
-        out.append(f"<latitude>{lat:.9f}</latitude>")
-        out.append(f'<altitude mode="absolute">{alt:.3f}</altitude>')
-        out.append("</geographic_location></coverage>")
     out.append('<unit name="meter" meter="1"/>')
     out.append("<up_axis>Z_UP</up_axis>")
     out.append("</asset>")
@@ -910,33 +899,6 @@ def _bucketize(dae: _Dae, top_nodes, faceme: list | None = None,
     return buckets
 
 
-def _adopt_geolocation(scene, root) -> None:
-    """If the COLLADA carries ``<asset><coverage><geographic_location>`` and the
-    scene has no datum yet, anchor the scene there — so a georeferenced model
-    (e.g. one exported with its site) brings its location in, keeping sun/shadow
-    studies meaningful. Never overrides a datum the user already set."""
-    if getattr(scene, "georef", None) is not None:
-        return
-    asset = root.find(f"{_NS}asset")
-    if asset is None:
-        return
-    geo = asset.find(f"{_NS}coverage/{_NS}geographic_location")
-    if geo is None:
-        return
-    lat_el = geo.find(f"{_NS}latitude")
-    lon_el = geo.find(f"{_NS}longitude")
-    if lat_el is None or lon_el is None or not lat_el.text or not lon_el.text:
-        return
-    alt_el = geo.find(f"{_NS}altitude")
-    try:
-        lat = float(lat_el.text)
-        lon = float(lon_el.text)
-        alt = float(alt_el.text) if (alt_el is not None and alt_el.text) else 0.0
-    except ValueError:
-        return
-    from georef.datum import SceneDatum
-    scene.georef = SceneDatum(lat, lon, alt)
-
 
 def load_dae(scene, path, progress=None) -> None:
     """See :func:`_load_dae_inner`. Wrapped to run with the generational GC off —
@@ -976,7 +938,6 @@ def _load_dae_inner(scene, path, progress=None) -> None:
     tick(0.02, "Reading file…")
     root = ET.parse(Path(path)).getroot()
     dae = _Dae(root, base_dir=Path(path).parent)
-    _adopt_geolocation(scene, root)
     top_nodes: list = []
     for vs in root.iter(f"{_NS}visual_scene"):
         top_nodes.extend(vs.findall(f"{_NS}node"))

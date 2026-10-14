@@ -58,9 +58,13 @@ from PySide6.QtGui import QVector3D
 from core.dimension import Dimension
 from core.group import Group
 from core.mesh import Mesh
-from georef.datum import SceneDatum
-from georef.geopath import GeoPath
 
+
+#: Faci3D saves and opens projects as ``.faci3d``: the very same document
+#: under its own name. IngeTrazo's ``.igz`` still comes in, through
+#: File ▸ Import, as a new unsaved project.
+SUFFIX = ".faci3d"
+LEGACY_SUFFIX = ".igz"
 
 PLAIN_FORMAT = 1        # bare JSON document (no images to carry)
 CONTAINER_FORMAT = 2    # ZIP container: document.json + textures/
@@ -256,9 +260,6 @@ def _face_attrs_json(f) -> dict:
     layer = getattr(f, "attrs", {}).get("layer")
     if layer is not None:
         entry["layer"] = layer
-    ifc = getattr(f, "attrs", {}).get("ifc")
-    if ifc is not None:
-        entry["ifc"] = dict(ifc)
     opacity = getattr(f, "attrs", {}).get("opacity")
     if opacity is not None:
         entry["opacity"] = float(opacity)
@@ -486,8 +487,6 @@ def save_scene(scene, path: Path) -> dict:
                 entry["axes"] = [float(x) for x in axes.data()]
             if getattr(g, "layer", None) is not None:
                 entry["layer"] = g.layer
-            if getattr(g, "ifc", None):
-                entry["ifc"] = dict(g.ifc)
             if getattr(g, "billboard", False):
                 # True = legacy textured-quad face-me; "mesh" = imported
                 # silhouette whose real geometry turns toward the camera.
@@ -536,12 +535,6 @@ def save_scene(scene, path: Path) -> dict:
     if layers is not None and (len(layers) > 1 or any(
             not ly.visible or ly.locked for ly in layers)):
         payload["layers"] = [ly.to_dict() for ly in layers]
-    views = getattr(scene, "saved_views", None)
-    if views:
-        payload["saved_views"] = [v.to_dict() for v in views]
-    comps = getattr(scene, "compositions", None)
-    if comps:
-        payload["compositions"] = [c.to_dict() for c in comps]
     dims = getattr(scene, "dimensions", None)
     if dims:
         payload["dimensions"] = [
@@ -581,22 +574,9 @@ def save_scene(scene, path: Path) -> dict:
                 continue
         if keep:
             payload["plugin_data"] = keep
-    scales = getattr(scene, "custom_scales", None)
-    if scales:
-        payload["custom_scales"] = [float(n) for n in scales]
     back = getattr(scene, "back_face_color", None)
     if back:
         payload["back_face_color"] = list(back)
-    splanes = getattr(scene, "section_planes", None)
-    if splanes:
-        payload["section_planes"] = [sp.to_dict() for sp in splanes]
-        vis = {}
-        if not getattr(scene, "show_section_planes", True):
-            vis["planes_hidden"] = True
-        if not getattr(scene, "show_section_cuts", True):
-            vis["cuts_hidden"] = True
-        if vis:
-            payload["section_view"] = vis
     shown = {}
     if getattr(scene, "show_hidden_objects", False):
         shown["objects"] = True
@@ -610,28 +590,6 @@ def save_scene(scene, path: Path) -> dict:
         d = dstyle.to_dict()
         if d != Style().to_dict():   # default stays implicit (terse files)
             payload["display_style"] = d
-    shadows = getattr(scene, "shadows", None)
-    if shadows is not None:
-        from core.sun import ShadowSettings
-        d = shadows.to_dict()
-        if d != ShadowSettings().to_dict():
-            payload["shadows"] = d
-    # Georeferencing datum (Track G) — optional block, written only when set so
-    # ungeoreferenced documents stay terse and older readers ignore it.
-    datum = getattr(scene, "georef", None)
-    if datum is not None:
-        payload["georef"] = {"datum": datum.to_dict()}
-    # Base-map capture (Track G, G1). Only the capture rectangle and the
-    # source, never the tiles — see TileLayer.to_dict.
-    tile_layer = getattr(scene, "tile_layer", None)
-    if tile_layer is not None:
-        payload["tile_layer"] = tile_layer.to_dict()
-    paths = getattr(scene, "geo_paths", None)
-    if paths:
-        payload["geo_paths"] = [p.to_dict() for p in paths]
-    points = getattr(scene, "geo_points", None)
-    if points:
-        payload["geo_points"] = [p.to_dict() for p in points]
     labels = getattr(scene, "text_labels", None)
     if labels:
         payload["text_labels"] = [t.to_dict() for t in labels]
@@ -648,15 +606,6 @@ def save_scene(scene, path: Path) -> dict:
     # that actually has textures pays for the container; everything else stays
     # plain JSON at format 1, readable by older builds.
     blobs, missing = _pack_textures(payload)
-    # The photogrammetric survey (Track G, G6) rides inside the document too,
-    # for the same reason the textures do: a reference mesh that lives in a
-    # folder next to the .igz is one move away from being lost.
-    survey = getattr(scene, "photo_mesh", None)
-    if survey is not None and getattr(survey, "triangle_count", 0):
-        from georef.photomesh import pack_mesh
-        meta, survey_blobs = pack_mesh(survey)
-        payload["photo_mesh"] = meta
-        blobs.update(survey_blobs)
     data = {
         "igz_format": (GEOMETRY_FORMAT if geom else
                        CONTAINER_FORMAT if blobs else PLAIN_FORMAT),
@@ -815,21 +764,6 @@ def _read_document(path: Path, pump=None):
     return data, archive
 
 
-def _unpack_photo_mesh(payload: dict, archive):
-    """Rebuild the stored survey, or ``None`` when the document has none."""
-    meta = payload.get("photo_mesh")
-    if not meta:
-        return None
-    from georef.photomesh import unpack_mesh
-
-    def read_blob(member: str) -> bytes:
-        try:
-            return archive.read(member)
-        except KeyError:
-            return b""
-
-    return unpack_mesh(meta, read_blob)
-
 
 def load_into(scene, path: Path, progress=None) -> None:
     """Replace ``scene`` contents with what's stored at ``path``.
@@ -903,7 +837,6 @@ def _load_into_inner(scene, path: Path, progress=None) -> None:
     data, archive = _read_document(
         path, pump=(lambda: tick(0.1, "Reading the document…"))
         if progress is not None else None)
-    survey = None
     geom: dict = {}
     try:
         if archive is not None:
@@ -913,9 +846,6 @@ def _load_into_inner(scene, path: Path, progress=None) -> None:
                     if n.startswith(_GEOM_PREFIX)}
             tick(0.2, "Unpacking textures…")
             _unpack_textures(data.get("scene", {}), archive)
-            # Rebuilt here, while the archive is still open — it closes below
-            # and the survey's blobs live inside it.
-            survey = _unpack_photo_mesh(data.get("scene", {}), archive)
     finally:
         if archive is not None:
             archive.close()
@@ -930,12 +860,7 @@ def _load_into_inner(scene, path: Path, progress=None) -> None:
     scene.mesh.clear()
     scene.selection.clear()
     scene.groups.clear()
-    scene.geo_paths.clear()
-    scene.geo_points.clear()
     scene.text_labels.clear()
-    scene.georef = None
-    scene.photo_mesh = survey
-    scene.tile_layer = None
 
     tick(0.35, "Building geometry…")
     _load_mesh(scene.mesh, payload, geom)
@@ -945,33 +870,12 @@ def _load_into_inner(scene, path: Path, progress=None) -> None:
         scene.layers = [Layer.from_dict(r) for r in raw_layers]
         if not any(ly.name == DEFAULT_LAYER for ly in scene.layers):
             scene.layers.insert(0, Layer(DEFAULT_LAYER))
-    raw_tiles = payload.get("tile_layer")
-    if raw_tiles:
-        from georef.tiles import TileLayer
-        try:
-            scene.tile_layer = TileLayer.from_dict(raw_tiles)
-        except Exception:  # noqa: BLE001 — a bad block costs the map, not the file
-            scene.tile_layer = None
     from core.materials import Material
     scene.materials = {}
     for raw in payload.get("materials", []):
         mat = Material.from_dict(raw)
         if mat.name:
             scene.materials[mat.name] = mat
-    from core.saved_views import SavedView
-    scene.saved_views = [SavedView.from_dict(r)
-                         for r in payload.get("saved_views", [])]
-    from core.composition import Composicion
-    scene.compositions = []
-    for r in payload.get("compositions", []):
-        # A sheet this version cannot rebuild must not take the model down
-        # with it: keep the others, log the one that failed.
-        try:
-            scene.compositions.append(Composicion.from_dict(r))
-        except Exception as exc:  # noqa: BLE001
-            import logging
-            logging.getLogger(__name__).warning(
-                "sheet %r skipped: %s", r.get("name", "?"), exc)
     proto_meshes: list = []
     import time as _time
     raw_protos = payload.get("protos", [])
@@ -1009,8 +913,6 @@ def _load_into_inner(scene, path: Path, progress=None) -> None:
                                       for col in range(4)])
         if raw.get("layer"):
             group.layer = raw["layer"]
-        if raw.get("ifc"):
-            group.ifc = dict(raw["ifc"])
         if raw.get("billboard"):
             group.billboard = raw["billboard"]   # True | "mesh"
         if isinstance(raw.get("text3d"), dict):
@@ -1077,10 +979,6 @@ def _load_into_inner(scene, path: Path, progress=None) -> None:
     scene.units = model_units_of(payload)   # validated; absent = metres
     pdata = payload.get("plugin_data")
     scene.plugin_data = dict(pdata) if isinstance(pdata, dict) else {}
-    scales = payload.get("custom_scales")
-    if isinstance(scales, list):
-        scene.custom_scales = [float(n) for n in scales
-                               if isinstance(n, (int, float)) and n > 0]
 
     back = payload.get("back_face_color")
     if isinstance(back, list) and len(back) == 3:
@@ -1094,41 +992,11 @@ def _load_into_inner(scene, path: Path, progress=None) -> None:
     scene.display_style = (Style.from_dict(dstyle)
                            if isinstance(dstyle, dict) else Style())
 
-    from core.sun import ShadowSettings
-    shadows = payload.get("shadows")
-    scene.shadows = (ShadowSettings.from_dict(shadows)
-                     if isinstance(shadows, dict) else ShadowSettings())
 
-    raw_planes = payload.get("section_planes")
-    if isinstance(raw_planes, list):
-        from core.section import SectionPlane
-        scene.section_planes = [SectionPlane.from_dict(r)
-                                for r in raw_planes]
-        # One active cut max: keep the FIRST marked active.
-        seen_active = False
-        for sp in scene.section_planes:
-            if sp.active and seen_active:
-                sp.active = False
-            seen_active = seen_active or sp.active
-    vis = payload.get("section_view")
-    if isinstance(vis, dict):
-        scene.show_section_planes = not vis.get("planes_hidden", False)
-        scene.show_section_cuts = not vis.get("cuts_hidden", False)
     shown = payload.get("hidden_view")
     if isinstance(shown, dict):
         scene.show_hidden_objects = bool(shown.get("objects", False))
         scene.show_hidden_geometry = bool(shown.get("geometry", False))
-
-    georef = payload.get("georef")
-    if isinstance(georef, dict) and isinstance(georef.get("datum"), dict):
-        scene.georef = SceneDatum.from_dict(georef["datum"])
-
-    for raw in payload.get("geo_paths", []):
-        scene.geo_paths.append(GeoPath.from_dict(raw))
-
-    from georef.points import GeoPoint
-    for raw in payload.get("geo_points", []):
-        scene.geo_points.append(GeoPoint.from_dict(raw))
 
     from core.textlabel import TextLabel
     for raw in payload.get("text_labels", []):
@@ -1209,8 +1077,6 @@ def _face_attrs_from_json(raw) -> dict | None:
         attrs["texture"] = dict(texture)
     if raw.get("layer"):
         attrs["layer"] = raw["layer"]
-    if raw.get("ifc"):
-        attrs["ifc"] = dict(raw["ifc"])
     if raw.get("opacity") is not None:
         attrs["opacity"] = float(raw["opacity"])
     if raw.get("hidden"):
